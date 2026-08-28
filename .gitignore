@@ -21,3 +21,6 @@ test/test_judge
 .idea/
 .DS_Store
 *.swp
+
+# Host test debug symbols
+test/*.dSYM/
