@@ -37,3 +37,8 @@
 接続中
 時刻待ち
 起動中
+
+# --- punctuation the layout uses that ASCII does not cover ---
+〜
+／
+：

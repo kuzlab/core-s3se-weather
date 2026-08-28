@@ -23,3 +23,10 @@ CONFIG_FREERTOS_HZ=1000
 # TLS: certificate verification via the bundled root CA store (SPEC §3.1).
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 CONFIG_ESP_TLS_INSECURE=n
+
+# LVGL v9 -----------------------------------------------------------------
+# Note: LV_COLOR_16_SWAP no longer exists in v9. The byte swap the ILI9342C
+# needs is done by esp_lvgl_port's swap_bytes flag instead (see main/ui.c).
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_USE_PERF_MONITOR=n
+CONFIG_LV_USE_MEM_MONITOR=n

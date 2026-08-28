@@ -11,6 +11,7 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h"
+#include "esp_lcd_touch.h"
 #include "esp_err.h"
 
 #include "aw9523b.h"
@@ -68,6 +69,12 @@ esp_err_t bsp_display_init(esp_lcd_panel_handle_t *out_panel,
 
 /* Fills the whole panel with one RGB565 colour. Milestone 2's check. */
 esp_err_t bsp_display_fill(esp_lcd_panel_handle_t panel, uint16_t rgb565);
+
+/* Brings up the FT6336U touch controller on the internal I2C bus.
+ * The interrupt line is behind the AW9523B, so this is polled: the handle is
+ * meant to be driven by LVGL's input-device read callback, not by an ISR
+ * (SPEC §4.2). */
+esp_err_t bsp_touch_init(esp_lcd_touch_handle_t *out_touch);
 
 /* Probes every 7-bit address and logs what answered. Milestone 1's check. */
 void bsp_i2c_scan_log(void);

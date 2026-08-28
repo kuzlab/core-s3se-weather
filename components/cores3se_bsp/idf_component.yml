@@ -3,3 +3,10 @@ dependencies:
     version: ">=5.3"
   espressif/esp_lcd_ili9341:
     version: "^2"
+  # esp_lcd_touch is pulled in by the ft5x06 driver, but cores3se_bsp.h
+  # exposes esp_lcd_touch_handle_t in its public API, so it has to be a
+  # direct dependency for the header to resolve.
+  espressif/esp_lcd_touch:
+    version: "^1"
+  espressif/esp_lcd_touch_ft5x06:
+    version: "^1"
