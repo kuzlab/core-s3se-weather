@@ -8,6 +8,9 @@
 
 #include <stdint.h>
 #include "driver/i2c_master.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_ops.h"
+#include "esp_lcd_panel_vendor.h"
 #include "esp_err.h"
 
 #include "aw9523b.h"
@@ -56,6 +59,15 @@ bm8563_handle_t         bsp_bm8563(void);
 
 /* 0 = backlight off, 1-255 = DLDO1 2.5V..3.3V. */
 esp_err_t bsp_backlight_set(uint8_t brightness);
+
+/* Brings up the SPI bus and the ILI934x panel. bsp_init() must have run
+ * first: the panel's reset line hangs off the AW9523B, and its supply rail
+ * off the AXP2101. Both handles are optional outputs. */
+esp_err_t bsp_display_init(esp_lcd_panel_handle_t *out_panel,
+                           esp_lcd_panel_io_handle_t *out_io);
+
+/* Fills the whole panel with one RGB565 colour. Milestone 2's check. */
+esp_err_t bsp_display_fill(esp_lcd_panel_handle_t panel, uint16_t rgb565);
 
 /* Probes every 7-bit address and logs what answered. Milestone 1's check. */
 void bsp_i2c_scan_log(void);
