@@ -30,3 +30,6 @@ CONFIG_ESP_TLS_INSECURE=n
 CONFIG_LV_COLOR_DEPTH_16=y
 CONFIG_LV_USE_PERF_MONITOR=n
 CONFIG_LV_USE_MEM_MONITOR=n
+
+# SNTP: two servers, so a single unreachable one does not stall the clock.
+CONFIG_LWIP_SNTP_MAX_SERVERS=2
