@@ -33,3 +33,20 @@ CONFIG_LV_USE_MEM_MONITOR=n
 
 # SNTP: two servers, so a single unreachable one does not stall the clock.
 CONFIG_LWIP_SNTP_MAX_SERVERS=2
+
+# TLS memory -------------------------------------------------------------
+# The first HTTPS handshake succeeded and every later one failed with
+# MBEDTLS_ERR_RSA_PUBLIC_FAILED + MBEDTLS_ERR_MPI_ALLOC_FAILED (0x4290) --
+# an out-of-memory during RSA verification, not a crypto fault. Wi-Fi and
+# LVGL leave little internal RAM, and mbedtls allocates from it by default.
+# There is 8MB of PSRAM, so send mbedtls there and let it release the large
+# TLS buffers between connections.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CONFIG_DATA=y
+CONFIG_MBEDTLS_DYNAMIC_FREE_CA_CERT=y
+CONFIG_MBEDTLS_ASYMMETRIC_CONTENT_LEN=y
+# Inbound stays large enough for a full certificate chain; outbound only
+# ever carries a short GET.
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=2048

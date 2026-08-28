@@ -17,6 +17,7 @@
 #include "weather_openmeteo.h"
 #include "wifi.h"
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -34,6 +35,9 @@ static const char *TAG = "main";
 
 #define UI_TICK_MS     60000   /* re-render at least once a minute */
 #define HEAP_LOG_SEC   300
+
+#define FETCH_RETRY_START_SEC 30
+#define FETCH_RETRY_MAX_SEC   300
 
 static const judge_config_t CFG = {
     .rain_mm    = CONFIG_LW_RAIN_MM_X100 / 100.0f,
@@ -68,11 +72,16 @@ static void net_task(void *arg)
 
     bool rtc_written = false;
     int64_t last_fetch_us = 0;
+    /* After a failure, retry well before the normal refresh interval --
+     * waiting ten minutes to notice the network came back would make the
+     * display stale for no reason. Backs off so a long outage does not mean
+     * hammering the API (SPEC §8.1). */
+    int interval_sec = CONFIG_LW_REFRESH_SEC;
 
     while (true) {
         const bool due = (last_fetch_us == 0) ||
                          (esp_timer_get_time() - last_fetch_us >=
-                          (int64_t)CONFIG_LW_REFRESH_SEC * 1000000);
+                          (int64_t)interval_sec * 1000000);
 
         if (due && wifi_is_connected()) {
             if (!time_is_valid()) {
@@ -87,6 +96,18 @@ static void net_task(void *arg)
                 openmeteo_result_t res;
                 const esp_err_t err = openmeteo_fetch(&res);
                 last_fetch_us = esp_timer_get_time();
+
+                if (err == ESP_OK) {
+                    interval_sec = CONFIG_LW_REFRESH_SEC;
+                } else {
+                    interval_sec = (interval_sec >= CONFIG_LW_REFRESH_SEC)
+                                 ? FETCH_RETRY_START_SEC
+                                 : interval_sec * 2;
+                    if (interval_sec > FETCH_RETRY_MAX_SEC) {
+                        interval_sec = FETCH_RETRY_MAX_SEC;
+                    }
+                    ESP_LOGW(TAG, "retrying in %d s", interval_sec);
+                }
 
                 if (app_state_lock(2000)) {
                     app_state_t *st = app_state_locked();
@@ -115,8 +136,7 @@ static void net_task(void *arg)
         }
 
         /* Wake early when a tap asks for an immediate refetch. */
-        const uint32_t wait_ms = due ? 5000 : 1000;
-        if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms)) > 0) {
+        if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000)) > 0) {
             ESP_LOGI(TAG, "refetch requested");
             last_fetch_us = 0;
         }
@@ -125,6 +145,46 @@ static void net_task(void *arg)
 
 /* ----------------------------------------------------------------- ui --- */
 
+/* When there is no verdict yet, the summary lines are the only place the
+ * device can explain itself. Saying "接続中" forever tells the user nothing
+ * about whether to fix the SSID, the password, or the placement, so name the
+ * actual failure. */
+static void format_startup_summary(char *l1, size_t l1_len, char *l2, size_t l2_len)
+{
+    switch (wifi_ui_state()) {
+        case WIFI_UI_DISABLED:
+            snprintf(l1, l1_len, "Wi-Fiに接続できません");
+            snprintf(l2, l2_len, "SSIDが設定されていません");
+            return;
+        case WIFI_UI_NO_AP:
+            snprintf(l1, l1_len, "Wi-Fiに接続できません");
+            /* All three causes look identical from here, so name them all
+             * rather than guessing at one. */
+            snprintf(l2, l2_len, "%s が見つかりません", CONFIG_LW_WIFI_SSID);
+            return;
+        case WIFI_UI_BAD_AUTH:
+            snprintf(l1, l1_len, "Wi-Fiに接続できません");
+            snprintf(l2, l2_len, "パスワードが違うようです");
+            return;
+        case WIFI_UI_OTHER_FAILURE:
+            snprintf(l1, l1_len, "Wi-Fiに接続できません");
+            snprintf(l2, l2_len, "電波が届いていないようです");
+            return;
+        case WIFI_UI_CONNECTING:
+            snprintf(l1, l1_len, "Wi-Fiに接続しています");
+            snprintf(l2, l2_len, "%s", CONFIG_LW_WIFI_SSID);
+            return;
+        case WIFI_UI_CONNECTED:
+            break;
+    }
+
+    if (!time_is_valid()) {
+        snprintf(l1, l1_len, "時刻を同期しています");
+        return;
+    }
+    snprintf(l1, l1_len, "予報を取得しています");
+}
+
 static void format_summary(const app_state_t *st, char *l1, size_t l1_len,
                            char *l2, size_t l2_len)
 {
@@ -132,7 +192,7 @@ static void format_summary(const app_state_t *st, char *l1, size_t l1_len,
     l2[0] = '\0';
 
     if (st->judge.verdict == V_UNKNOWN) {
-        snprintf(l1, l1_len, "時刻待ち");
+        format_startup_summary(l1, l1_len, l2, l2_len);
         return;
     }
 
@@ -191,7 +251,15 @@ static void render(void)
 
     char status[32];
     if (st.last_update == 0) {
-        snprintf(status, sizeof(status), wifi_is_connected() ? "取得中" : "接続中");
+        /* Distinct words for distinct stages: a single "接続中" that never
+         * changes is indistinguishable from a hang. */
+        const char *stage;
+        switch (wifi_ui_state()) {
+            case WIFI_UI_CONNECTED:  stage = time_is_valid() ? "取得中" : "同期中"; break;
+            case WIFI_UI_CONNECTING: stage = "接続中"; break;
+            default:                 stage = "未接続"; break;
+        }
+        snprintf(status, sizeof(status), "%s", stage);
     } else {
         struct tm tm_u;
         localtime_r(&st.last_update, &tm_u);
@@ -238,9 +306,17 @@ static void ui_task(void *arg)
         render();
 
         if (esp_timer_get_time() - last_heap_log_us >= (int64_t)HEAP_LOG_SEC * 1000000) {
-            ESP_LOGI(TAG, "free heap: %" PRIu32 " bytes, min ever: %" PRIu32
-                          ", uptime: %" PRId64 " s",
-                     esp_get_free_heap_size(), esp_get_minimum_free_heap_size(),
+            /* Internal RAM is reported separately because the total is
+             * dominated by 8MB of PSRAM: an internal-RAM shortage that
+             * breaks TLS is invisible in the combined figure. The largest
+             * free block matters more than the sum, since that is what an
+             * allocation actually needs. */
+            ESP_LOGI(TAG, "heap: total %u free / internal %u free, "
+                          "largest internal block %u, min internal ever %u, uptime %" PRId64 " s",
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_DEFAULT),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
                      esp_timer_get_time() / 1000000);
             last_heap_log_us = esp_timer_get_time();
         }

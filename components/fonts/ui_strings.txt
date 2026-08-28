@@ -33,10 +33,22 @@
 確率
 
 # --- status / errors ---
+# These have to name the actual problem. "接続中" that never changes tells
+# the user nothing about whether the SSID is wrong, the password is wrong,
+# or the access point is simply out of range.
 取得失敗
+未接続
 接続中
-時刻待ち
+同期中
+取得中
 起動中
+Wi-Fiに接続できません
+が見つかりません
+パスワードが違うようです
+電波が届いていないようです
+時刻を同期しています
+予報を取得しています
+は2.4GHz帯のみ対応です
 
 # --- punctuation the layout uses that ASCII does not cover ---
 〜
