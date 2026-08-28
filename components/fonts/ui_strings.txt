@@ -10,47 +10,48 @@
 # --- header ---
 浦安市
 更新
-失敗
-同期待ち
-
-# --- verdict banner (SPEC §1.2) ---
-干してOK
-短時間なら可
-まもなく取り込め
-取り込め
-データなし
-
-# --- summary lines ---
-あと約
-時間で降り出します
-今降っています
-時間以内に雨の予報はありません
-最大
-直近
-分レーダー
-時間表示
-雨量
-確率
-
-# --- status / errors ---
-# These have to name the actual problem. "接続中" that never changes tells
-# the user nothing about whether the SSID is wrong, the password is wrong,
-# or the access point is simply out of range.
-取得失敗
+更新できず
 未接続
 接続中
 同期中
 取得中
-起動中
-Wi-Fiに接続できません
+
+# --- verdict banner ---
+# Deliberately gentle: this thing sits in a home and talks to whoever walks
+# past it, so it suggests rather than orders.
+ほしてだいじょうぶ
+みじかめならOK
+そろそろとりこもう
+あめ！とりこんで
+じゅんびちゅう
+
+# --- summary lines ---
+さいだい
+時間くらいでふりそう
+いまふっています
+時間あめのよほうはなさそう
+あと
+時間
+レーダー
+
+# --- status / errors ---
+# These have to name the actual problem. A message that never changes tells
+# the user nothing about whether the SSID is wrong, the password is wrong,
+# or the access point is simply out of range.
+Wi-Fiにつながりません
+Wi-Fiにつないでいます
 が見つかりません
 パスワードが違うようです
 電波が届いていないようです
-時刻を同期しています
-予報を取得しています
-は2.4GHz帯のみ対応です
+SSIDが設定されていません
+時刻をあわせています
+よほうをとりよせています
 
-# --- punctuation the layout uses that ASCII does not cover ---
+# --- symbols the layout uses that ASCII does not cover ---
 〜
 ／
 ：
+！
+☀
+☁
+☂

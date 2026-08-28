@@ -15,37 +15,56 @@ static const char *TAG = "ui";
 #define SCREEN_W 320
 #define SCREEN_H 240
 
-/* Layout, top to bottom. Kept as constants rather than a layout engine
- * because the screen is fixed-size and every element has a set place. */
-#define PAD_X            6
-#define HEADER_Y         2
-#define HEADER_H         18
-#define BANNER_Y         22
-#define BANNER_H         42
-#define SUMMARY1_Y       68
-#define SUMMARY2_Y       88
-#define NOWCAST_Y        108
-#define GRAPH_CAPTION_Y  128
-#define GRAPH_Y          146
-#define GRAPH_H          56
-#define AXIS_Y           204
+/* Layout, top to bottom. Constants rather than a layout engine because the
+ * screen is a fixed size and every element has one place it belongs. */
+#define PAD_X            8
+#define HEADER_Y         4
+#define BANNER_Y         26
+#define BANNER_H         60
+#define SUMMARY1_Y       92
+#define SUMMARY2_Y       112
+#define CAPTION_Y        134
+#define GRAPH_Y          154
+#define GRAPH_H          46
+#define AXIS_Y           202
 
 #define GRAPH_X          PAD_X
 #define GRAPH_W          (SCREEN_W - 2 * PAD_X)
 
-/* SPEC §5 verdict colours */
-#define COLOR_OK        0x2EA043
-#define COLOR_CAUTION   0xD89B00
-#define COLOR_BRING_IN  0xE05000
-#define COLOR_RAINING   0xC02030
-#define COLOR_UNKNOWN   0x404850
+#define ICON_BOX         52
+#define ICON_X           8
+#define BANNER_TEXT_X    (ICON_X + ICON_BOX + 8)
 
-#define COLOR_BG        0x101418
-#define COLOR_TEXT      0xE6EDF3
-#define COLOR_DIM       0x8B949E
-#define COLOR_POP_BAR   0x1F3A5F  /* probability, behind */
-#define COLOR_MM_BAR    0x39D0D8  /* amount, in front */
-#define COLOR_MM_RAINY  0x58A6FF  /* amount in a slot judged rainy */
+/* --- palette -------------------------------------------------------------
+ * A light, warm scheme: this sits in a living space, not a server rack.
+ * Verdict colours are a soft tint behind saturated same-hue text, which
+ * reads as friendlier than white-on-saturated and holds more contrast. */
+#define C_BG            0xF6F3EC
+#define C_CARD          0xFFFFFF
+#define C_TEXT          0x3D4450
+#define C_DIM           0x929AA5
+#define C_BORDER        0xE6E1D8
+
+#define C_OK_BG         0xE7F6EA
+#define C_OK_FG         0x2E7D4F
+#define C_CAUTION_BG    0xFFF4DC
+#define C_CAUTION_FG    0xA9760A
+#define C_BRING_IN_BG   0xFFE9DC
+#define C_BRING_IN_FG   0xC0551D
+#define C_RAINING_BG    0xFFE4E6
+#define C_RAINING_FG    0xC0392B
+#define C_UNKNOWN_BG    0xEDEBE6
+#define C_UNKNOWN_FG    0x8A9199
+
+#define C_SUN           0xFFC93C
+#define C_SUN_HALO      0xFFE7A3
+#define C_CLOUD         0xAFC0D2
+#define C_CLOUD_LIGHT   0xC9D6E3
+#define C_DROP          0x4A90D9
+
+#define C_POP_BAR       0xDCE7F3
+#define C_MM_BAR        0x86B8E6
+#define C_MM_RAINY      0x3C7FC4
 
 /* Bars are pre-created for the widest range so switching 24h <-> 12h only
  * resizes them; creating and deleting objects on every update would churn
@@ -53,6 +72,9 @@ static const char *TAG = "ui";
 #define MAX_BARS         24
 #define AXIS_LABEL_STEP  3
 #define MAX_AXIS_LABELS  (MAX_BARS / AXIS_LABEL_STEP + 1)
+
+#define N_DROPS          3
+#define DROP_FALL_MS     900
 
 static lv_obj_t *s_place_label;
 static lv_obj_t *s_status_label;
@@ -67,17 +89,48 @@ static lv_obj_t *s_pop_bars[MAX_BARS];
 static lv_obj_t *s_mm_bars[MAX_BARS];
 static lv_obj_t *s_axis_labels[MAX_AXIS_LABELS];
 
+/* Weather icon, drawn from primitives rather than glyphs so it can carry
+ * colour and move. */
+static lv_obj_t *s_icon_box;
+static lv_obj_t *s_sun_halo;
+static lv_obj_t *s_sun_core;
+static lv_obj_t *s_cloud_parts[4];
+static lv_obj_t *s_drops[N_DROPS];
+static bool      s_rain_animating;
+
 static int         s_range_hours = 24;
 static ui_tap_cb_t s_tap_cb;
 
-static uint32_t verdict_color(verdict_t v)
+static const char *verdict_text(verdict_t v)
 {
     switch (v) {
-        case V_OK:       return COLOR_OK;
-        case V_CAUTION:  return COLOR_CAUTION;
-        case V_BRING_IN: return COLOR_BRING_IN;
-        case V_RAINING:  return COLOR_RAINING;
-        default:         return COLOR_UNKNOWN;
+        case V_OK:       return "ほしてだいじょうぶ";
+        case V_CAUTION:  return "みじかめならOK";
+        case V_BRING_IN: return "そろそろとりこもう";
+        case V_RAINING:  return "あめ！とりこんで";
+        default:         return "じゅんびちゅう";
+    }
+}
+
+static uint32_t verdict_bg(verdict_t v)
+{
+    switch (v) {
+        case V_OK:       return C_OK_BG;
+        case V_CAUTION:  return C_CAUTION_BG;
+        case V_BRING_IN: return C_BRING_IN_BG;
+        case V_RAINING:  return C_RAINING_BG;
+        default:         return C_UNKNOWN_BG;
+    }
+}
+
+static uint32_t verdict_fg(verdict_t v)
+{
+    switch (v) {
+        case V_OK:       return C_OK_FG;
+        case V_CAUTION:  return C_CAUTION_FG;
+        case V_BRING_IN: return C_BRING_IN_FG;
+        case V_RAINING:  return C_RAINING_FG;
+        default:         return C_UNKNOWN_FG;
     }
 }
 
@@ -94,9 +147,6 @@ static void screen_tap_cb(lv_event_t *e)
     ESP_LOGI(TAG, "graph range -> %dh", s_range_hours);
 
     if (s_tap_cb != NULL) {
-        /* The callback triggers a refetch, so it must not run inside the
-         * LVGL lock this event handler is already holding. It is expected to
-         * only signal the network task. */
         s_tap_cb(s_range_hours);
     }
 }
@@ -112,17 +162,136 @@ static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font,
     return l;
 }
 
+/* A plain filled shape with none of lv_obj's default chrome. */
+static lv_obj_t *make_shape(lv_obj_t *parent, int w, int h, int radius, uint32_t color)
+{
+    lv_obj_t *o = lv_obj_create(parent);
+    lv_obj_set_size(o, w, h);
+    lv_obj_set_style_radius(o, radius, 0);
+    lv_obj_set_style_bg_color(o, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(o, 0, 0);
+    lv_obj_set_style_pad_all(o, 0, 0);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+    return o;
+}
+
+static void build_icon(lv_obj_t *parent)
+{
+    s_icon_box = lv_obj_create(parent);
+    lv_obj_set_size(s_icon_box, ICON_BOX, ICON_BOX);
+    lv_obj_set_pos(s_icon_box, ICON_X, (BANNER_H - ICON_BOX) / 2);
+    lv_obj_set_style_bg_opa(s_icon_box, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_icon_box, 0, 0);
+    lv_obj_set_style_pad_all(s_icon_box, 0, 0);
+    /* Drops animate past the cloud and must be clipped to the box. */
+    lv_obj_remove_flag(s_icon_box, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(s_icon_box, LV_OBJ_FLAG_CLICKABLE);
+
+    s_sun_halo = make_shape(s_icon_box, 44, 44, 22, C_SUN_HALO);
+    s_sun_core = make_shape(s_icon_box, 30, 30, 15, C_SUN);
+
+    /* Cloud: three lobes over a flat base. */
+    s_cloud_parts[0] = make_shape(s_icon_box, 40, 15, 8, C_CLOUD);
+    s_cloud_parts[1] = make_shape(s_icon_box, 20, 20, 10, C_CLOUD);
+    s_cloud_parts[2] = make_shape(s_icon_box, 26, 26, 13, C_CLOUD_LIGHT);
+    s_cloud_parts[3] = make_shape(s_icon_box, 18, 18, 9, C_CLOUD);
+
+    for (int i = 0; i < N_DROPS; i++) {
+        s_drops[i] = make_shape(s_icon_box, 4, 9, 2, C_DROP);
+        lv_obj_add_flag(s_drops[i], LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void stop_rain(void)
+{
+    for (int i = 0; i < N_DROPS; i++) {
+        lv_anim_delete(s_drops[i], NULL);
+        lv_obj_add_flag(s_drops[i], LV_OBJ_FLAG_HIDDEN);
+    }
+    s_rain_animating = false;
+}
+
+static void start_rain(void)
+{
+    if (s_rain_animating) {
+        return;
+    }
+    for (int i = 0; i < N_DROPS; i++) {
+        lv_obj_set_x(s_drops[i], 12 + i * 12);
+        lv_obj_remove_flag(s_drops[i], LV_OBJ_FLAG_HIDDEN);
+
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, s_drops[i]);
+        lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_obj_set_y);
+        lv_anim_set_values(&a, 34, ICON_BOX - 6);
+        lv_anim_set_duration(&a, DROP_FALL_MS);
+        /* Staggered so the drops read as rain rather than as a row of bars
+         * moving in lockstep. */
+        lv_anim_set_delay(&a, i * (DROP_FALL_MS / N_DROPS));
+        lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+        lv_anim_start(&a);
+    }
+    s_rain_animating = true;
+}
+
+static void set_icon(verdict_t v)
+{
+    const bool show_sun   = (v == V_OK || v == V_CAUTION);
+    const bool show_cloud = (v != V_OK);
+    const bool show_rain  = (v == V_RAINING);
+
+    if (show_sun) {
+        /* Alone the sun sits centred; with a cloud it peeks out top-right. */
+        const bool alone = (v == V_OK);
+        lv_obj_set_pos(s_sun_halo, alone ? 4 : 16, alone ? 4 : 0);
+        lv_obj_set_size(s_sun_halo, alone ? 44 : 32, alone ? 44 : 32);
+        lv_obj_set_style_radius(s_sun_halo, alone ? 22 : 16, 0);
+        lv_obj_set_pos(s_sun_core, alone ? 11 : 22, alone ? 11 : 6);
+        lv_obj_set_size(s_sun_core, alone ? 30 : 20, alone ? 30 : 20);
+        lv_obj_set_style_radius(s_sun_core, alone ? 15 : 10, 0);
+        lv_obj_remove_flag(s_sun_halo, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_sun_core, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_sun_halo, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_sun_core, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    if (show_cloud) {
+        const int base_y = show_rain ? 20 : 22;
+        lv_obj_set_pos(s_cloud_parts[0], 5,  base_y + 6);
+        lv_obj_set_pos(s_cloud_parts[1], 4,  base_y - 2);
+        lv_obj_set_pos(s_cloud_parts[2], 14, base_y - 8);
+        lv_obj_set_pos(s_cloud_parts[3], 29, base_y - 1);
+        for (int i = 0; i < 4; i++) {
+            lv_obj_remove_flag(s_cloud_parts[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    } else {
+        for (int i = 0; i < 4; i++) {
+            lv_obj_add_flag(s_cloud_parts[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    if (show_rain) {
+        start_rain();
+    } else {
+        stop_rain();
+    }
+}
+
 static void build_screen(void)
 {
     lv_obj_t *scr = lv_screen_active();
-    lv_obj_set_style_bg_color(scr, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(C_BG), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(scr, screen_tap_cb, LV_EVENT_CLICKED, NULL);
 
     /* --- header --- */
-    s_place_label = make_label(scr, &lw_font_jp_16, COLOR_TEXT, PAD_X, HEADER_Y);
-    s_status_label = make_label(scr, &lw_font_jp_16, COLOR_DIM, 0, HEADER_Y);
+    s_place_label = make_label(scr, &lw_font_jp_16, C_TEXT, PAD_X, HEADER_Y);
+    s_status_label = make_label(scr, &lw_font_jp_16, C_DIM, 0, HEADER_Y);
     lv_obj_set_style_text_align(s_status_label, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_width(s_status_label, SCREEN_W / 2);
     lv_obj_set_pos(s_status_label, SCREEN_W - PAD_X - SCREEN_W / 2, HEADER_Y);
@@ -131,61 +300,59 @@ static void build_screen(void)
     s_banner = lv_obj_create(scr);
     lv_obj_set_size(s_banner, GRAPH_W, BANNER_H);
     lv_obj_set_pos(s_banner, PAD_X, BANNER_Y);
-    lv_obj_set_style_radius(s_banner, 6, 0);
+    lv_obj_set_style_radius(s_banner, 14, 0);
     lv_obj_set_style_border_width(s_banner, 0, 0);
     lv_obj_set_style_pad_all(s_banner, 0, 0);
-    lv_obj_set_style_bg_color(s_banner, lv_color_hex(COLOR_UNKNOWN), 0);
+    lv_obj_set_style_bg_color(s_banner, lv_color_hex(C_UNKNOWN_BG), 0);
     lv_obj_remove_flag(s_banner, LV_OBJ_FLAG_SCROLLABLE);
     /* Taps must reach the screen handler, not stop at the banner. */
     lv_obj_remove_flag(s_banner, LV_OBJ_FLAG_CLICKABLE);
 
+    build_icon(s_banner);
+
     s_banner_label = lv_label_create(s_banner);
     lv_obj_set_style_text_font(s_banner_label, &lw_font_jp_24, 0);
-    lv_obj_set_style_text_color(s_banner_label, lv_color_hex(0xFFFFFF), 0);
-    lv_label_set_text(s_banner_label, "起動中");
-    lv_obj_center(s_banner_label);
+    lv_obj_set_style_text_color(s_banner_label, lv_color_hex(C_UNKNOWN_FG), 0);
+    lv_obj_set_style_text_align(s_banner_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_width(s_banner_label, GRAPH_W - BANNER_TEXT_X - 6);
+    lv_obj_set_pos(s_banner_label, BANNER_TEXT_X, (BANNER_H - 26) / 2);
+    lv_label_set_text(s_banner_label, verdict_text(V_UNKNOWN));
 
     /* --- summary --- */
-    s_summary1 = make_label(scr, &lw_font_jp_16, COLOR_TEXT, PAD_X, SUMMARY1_Y);
-    s_summary2 = make_label(scr, &lw_font_jp_16, COLOR_TEXT, PAD_X, SUMMARY2_Y);
-    s_nowcast  = make_label(scr, &lw_font_jp_16, COLOR_DIM,  PAD_X, NOWCAST_Y);
-    lv_obj_add_flag(s_nowcast, LV_OBJ_FLAG_HIDDEN);
+    s_summary1 = make_label(scr, &lw_font_jp_16, C_TEXT, PAD_X, SUMMARY1_Y);
+    s_summary2 = make_label(scr, &lw_font_jp_16, C_TEXT, PAD_X, SUMMARY2_Y);
 
     /* --- graph --- */
-    s_graph_caption = make_label(scr, &lw_font_jp_16, COLOR_DIM, PAD_X, GRAPH_CAPTION_Y);
+    s_graph_caption = make_label(scr, &lw_font_jp_16, C_DIM, PAD_X, CAPTION_Y);
+
+    s_nowcast = make_label(scr, &lw_font_jp_16, C_DIM, 0, CAPTION_Y);
+    lv_obj_set_style_text_align(s_nowcast, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_width(s_nowcast, SCREEN_W / 2);
+    lv_obj_set_pos(s_nowcast, SCREEN_W - PAD_X - SCREEN_W / 2, CAPTION_Y);
+    lv_obj_add_flag(s_nowcast, LV_OBJ_FLAG_HIDDEN);
 
     s_graph_area = lv_obj_create(scr);
     lv_obj_set_size(s_graph_area, GRAPH_W, GRAPH_H);
     lv_obj_set_pos(s_graph_area, GRAPH_X, GRAPH_Y);
-    lv_obj_set_style_bg_color(s_graph_area, lv_color_hex(0x161B22), 0);
-    lv_obj_set_style_border_width(s_graph_area, 0, 0);
-    lv_obj_set_style_radius(s_graph_area, 2, 0);
+    lv_obj_set_style_bg_color(s_graph_area, lv_color_hex(C_CARD), 0);
+    lv_obj_set_style_border_color(s_graph_area, lv_color_hex(C_BORDER), 0);
+    lv_obj_set_style_border_width(s_graph_area, 1, 0);
+    lv_obj_set_style_radius(s_graph_area, 6, 0);
     lv_obj_set_style_pad_all(s_graph_area, 0, 0);
     lv_obj_remove_flag(s_graph_area, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(s_graph_area, LV_OBJ_FLAG_CLICKABLE);
 
     for (int i = 0; i < MAX_BARS; i++) {
-        s_pop_bars[i] = lv_obj_create(s_graph_area);
-        lv_obj_set_style_bg_color(s_pop_bars[i], lv_color_hex(COLOR_POP_BAR), 0);
-        lv_obj_set_style_border_width(s_pop_bars[i], 0, 0);
-        lv_obj_set_style_radius(s_pop_bars[i], 0, 0);
-        lv_obj_set_style_pad_all(s_pop_bars[i], 0, 0);
-        lv_obj_remove_flag(s_pop_bars[i], LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_remove_flag(s_pop_bars[i], LV_OBJ_FLAG_CLICKABLE);
-
-        s_mm_bars[i] = lv_obj_create(s_graph_area);
-        lv_obj_set_style_bg_color(s_mm_bars[i], lv_color_hex(COLOR_MM_BAR), 0);
-        lv_obj_set_style_border_width(s_mm_bars[i], 0, 0);
-        lv_obj_set_style_radius(s_mm_bars[i], 0, 0);
-        lv_obj_set_style_pad_all(s_mm_bars[i], 0, 0);
-        lv_obj_remove_flag(s_mm_bars[i], LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_remove_flag(s_mm_bars[i], LV_OBJ_FLAG_CLICKABLE);
+        s_pop_bars[i] = make_shape(s_graph_area, 1, 1, 1, C_POP_BAR);
+        s_mm_bars[i]  = make_shape(s_graph_area, 1, 1, 1, C_MM_BAR);
     }
 
     for (int i = 0; i < MAX_AXIS_LABELS; i++) {
-        s_axis_labels[i] = make_label(scr, &lw_font_jp_16, COLOR_DIM, 0, AXIS_Y);
+        s_axis_labels[i] = make_label(scr, &lw_font_jp_16, C_DIM, 0, AXIS_Y);
         lv_obj_add_flag(s_axis_labels[i], LV_OBJ_FLAG_HIDDEN);
     }
+
+    set_icon(V_UNKNOWN);
 }
 
 esp_err_t ui_start(esp_lcd_panel_handle_t panel,
@@ -270,9 +437,10 @@ void ui_set_verdict(verdict_t v)
     if (!lvgl_port_lock(0)) {
         return;
     }
-    lv_obj_set_style_bg_color(s_banner, lv_color_hex(verdict_color(v)), 0);
-    lv_label_set_text(s_banner_label, judge_verdict_label(v));
-    lv_obj_center(s_banner_label);
+    lv_obj_set_style_bg_color(s_banner, lv_color_hex(verdict_bg(v)), 0);
+    lv_obj_set_style_text_color(s_banner_label, lv_color_hex(verdict_fg(v)), 0);
+    lv_label_set_text(s_banner_label, verdict_text(v));
+    set_icon(v);
     lvgl_port_unlock();
 }
 
@@ -295,7 +463,7 @@ void ui_set_nowcast(float max_mm_h)
         lv_obj_add_flag(s_nowcast, LV_OBJ_FLAG_HIDDEN);
     } else {
         char buf[64];
-        snprintf(buf, sizeof(buf), "直近60分レーダー：最大 %.1f mm/h", (double)max_mm_h);
+        snprintf(buf, sizeof(buf), "レーダー %.1fmm/h", (double)max_mm_h);
         lv_label_set_text(s_nowcast, buf);
         lv_obj_remove_flag(s_nowcast, LV_OBJ_FLAG_HIDDEN);
     }
@@ -345,7 +513,7 @@ void ui_set_graph(const hour_slot_t *slots, int n_slots, int start,
     }
 
     char caption[64];
-    snprintf(caption, sizeof(caption), "最大 %.1fmm/h ／ %d時間表示", (double)max_mm, hours);
+    snprintf(caption, sizeof(caption), "さいだい %.1fmm/h ／ %d時間", (double)max_mm, hours);
     lv_label_set_text(s_graph_caption, caption);
 
     for (int i = 0; i < MAX_BARS; i++) {
@@ -375,7 +543,7 @@ void ui_set_graph(const hour_slot_t *slots, int n_slots, int start,
 
         const bool rainy = judge_is_rainy(slot, cfg);
         lv_obj_set_style_bg_color(s_mm_bars[i],
-                                  lv_color_hex(rainy ? COLOR_MM_RAINY : COLOR_MM_BAR), 0);
+                                  lv_color_hex(rainy ? C_MM_RAINY : C_MM_BAR), 0);
         lv_obj_set_size(s_mm_bars[i], bar_w, mm_h > 0 ? mm_h : 1);
         lv_obj_set_pos(s_mm_bars[i], x, GRAPH_H - (mm_h > 0 ? mm_h : 1));
         lv_obj_set_style_bg_opa(s_mm_bars[i], mm_h > 0 ? LV_OPA_COVER : LV_OPA_TRANSP, 0);

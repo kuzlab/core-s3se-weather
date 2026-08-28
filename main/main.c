@@ -181,25 +181,25 @@ static void format_startup_summary(char *l1, size_t l1_len, char *l2, size_t l2_
 {
     switch (wifi_ui_state()) {
         case WIFI_UI_DISABLED:
-            snprintf(l1, l1_len, "Wi-Fiに接続できません");
+            snprintf(l1, l1_len, "Wi-Fiにつながりません");
             snprintf(l2, l2_len, "SSIDが設定されていません");
             return;
         case WIFI_UI_NO_AP:
-            snprintf(l1, l1_len, "Wi-Fiに接続できません");
+            snprintf(l1, l1_len, "Wi-Fiにつながりません");
             /* All three causes look identical from here, so name them all
              * rather than guessing at one. */
             snprintf(l2, l2_len, "%s が見つかりません", CONFIG_LW_WIFI_SSID);
             return;
         case WIFI_UI_BAD_AUTH:
-            snprintf(l1, l1_len, "Wi-Fiに接続できません");
+            snprintf(l1, l1_len, "Wi-Fiにつながりません");
             snprintf(l2, l2_len, "パスワードが違うようです");
             return;
         case WIFI_UI_OTHER_FAILURE:
-            snprintf(l1, l1_len, "Wi-Fiに接続できません");
+            snprintf(l1, l1_len, "Wi-Fiにつながりません");
             snprintf(l2, l2_len, "電波が届いていないようです");
             return;
         case WIFI_UI_CONNECTING:
-            snprintf(l1, l1_len, "Wi-Fiに接続しています");
+            snprintf(l1, l1_len, "Wi-Fiにつないでいます");
             snprintf(l2, l2_len, "%s", CONFIG_LW_WIFI_SSID);
             return;
         case WIFI_UI_CONNECTED:
@@ -207,10 +207,10 @@ static void format_startup_summary(char *l1, size_t l1_len, char *l2, size_t l2_
     }
 
     if (!time_is_valid()) {
-        snprintf(l1, l1_len, "時刻を同期しています");
+        snprintf(l1, l1_len, "時刻をあわせています");
         return;
     }
-    snprintf(l1, l1_len, "予報を取得しています");
+    snprintf(l1, l1_len, "よほうをとりよせています");
 }
 
 static void format_summary(const app_state_t *st, char *l1, size_t l1_len,
@@ -225,21 +225,21 @@ static void format_summary(const app_state_t *st, char *l1, size_t l1_len,
     }
 
     if (st->judge.hours_to_rain < 0) {
-        snprintf(l1, l1_len, "24時間以内に雨の予報はありません");
+        snprintf(l1, l1_len, "☀ %d時間 あめのよほうはなさそう", JUDGE_HORIZON_H);
         return;
     }
 
     struct tm tm_s, tm_e;
     localtime_r(&st->judge.rain_start, &tm_s);
     localtime_r(&st->judge.rain_end, &tm_e);
-    snprintf(l1, l1_len, "%02d:%02d〜%02d:%02d  %.1fmm  最大%d%%",
+    snprintf(l1, l1_len, "☂ %02d:%02d〜%02d:%02d  %.1fmm  さいだい%d%%",
              tm_s.tm_hour, tm_s.tm_min, tm_e.tm_hour, tm_e.tm_min,
              (double)st->judge.rain_total_mm, st->judge.rain_peak_pop);
 
     if (st->judge.hours_to_rain == 0) {
-        snprintf(l2, l2_len, "今降っています");
+        snprintf(l2, l2_len, "いまふっています");
     } else {
-        snprintf(l2, l2_len, "あと約%d時間で降り出します", st->judge.hours_to_rain);
+        snprintf(l2, l2_len, "あと%d時間くらいでふりそう", st->judge.hours_to_rain);
     }
 }
 
@@ -294,7 +294,7 @@ static void render(void)
         /* The timestamp always shows the last *success*, with the prefix
          * saying whether the newest attempt worked (SPEC §8.1). */
         snprintf(status, sizeof(status), "%s %02d:%02d",
-                 st.last_fetch_ok ? "更新" : "失敗", tm_u.tm_hour, tm_u.tm_min);
+                 st.last_fetch_ok ? "更新" : "更新できず", tm_u.tm_hour, tm_u.tm_min);
     }
     ui_set_header(CONFIG_LW_PLACE_NAME, status);
 
