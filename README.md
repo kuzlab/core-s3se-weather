@@ -9,6 +9,9 @@ USB給電で電源を入れっぱなしにして使うことを前提として�
 実装仕様は [`SPEC_laundry_weather_cores3se.md`](SPEC_laundry_weather_cores3se.md)、
 ハードウェアの調査結果は [`docs/HARDWARE.md`](docs/HARDWARE.md) を参照。
 
+構想から完成までの経緯とはまりどころは [`docs/DEVLOG.md`](docs/DEVLOG.md) にまとめてある。
+CoreS3 SE で ESP-IDF を使う人が同じ穴に落ちないように、実際のログ付きで記録した。
+
 ## 現在の状態
 
 | # | マイルストーン | 状態 |
