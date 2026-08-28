@@ -401,6 +401,12 @@ void app_main(void)
     if (bsp_audio_init() != ESP_OK) {
         ESP_LOGW(TAG, "audio unavailable; verdict changes will be silent");
     }
+#if CONFIG_LW_BEEP_SELFTEST
+    else {
+        ESP_LOGI(TAG, "beep self-test (CONFIG_LW_BEEP_SELFTEST is on)");
+        bsp_beep_alert();
+    }
+#endif
 #endif
     ESP_ERROR_CHECK(bsp_backlight_set(CONFIG_LW_BRIGHTNESS_DAY));
 

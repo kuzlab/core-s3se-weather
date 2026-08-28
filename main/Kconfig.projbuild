@@ -183,6 +183,33 @@ config LW_ENABLE_BEEP
         Two short beeps on a transition into "bring in" or "raining" only.
         Disable if the speaker hardware turns out to be absent or noisy.
 
+config LW_BEEP_SELFTEST
+    bool "Beep once at startup to check the speaker"
+    depends on LW_ENABLE_BEEP
+    default n
+    help
+        The alert only fires when the verdict gets worse, which can be days
+        apart, so there is otherwise no way to tell a silent speaker from a
+        working one that has had no reason to sound. Turn this on to check
+        the volume, then turn it back off -- a device that chirps on every
+        power cycle is a device people mute.
+
+config LW_BEEP_VOLUME
+    int "Beep volume (1-10)"
+    depends on LW_ENABLE_BEEP
+    default 3
+    range 1 10
+    help
+        Steps are roughly 4dB apart, not linear, because loudness is
+        perceived logarithmically -- an evenly spaced scale would put every
+        usable quiet setting in its bottom step. 10 is as loud as the
+        amplifier is driven here; 1 is barely audible across a room.
+
+        The default is deliberately low. This fires unannounced in a home,
+        so being startled by it is worse than not quite hearing it -- the
+        screen is the primary output and the sound only draws attention to
+        it. Raise it if the device sits far from where people are.
+
 endmenu
 
 endmenu

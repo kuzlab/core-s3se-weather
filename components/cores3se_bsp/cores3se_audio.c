@@ -15,6 +15,7 @@
 
 #include "driver/i2s_std.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -34,7 +35,25 @@ static const char *TAG = "bsp.audio";
 #define AUDIO_DOUT_GPIO 13
 
 #define AUDIO_SAMPLE_RATE 16000
-#define AUDIO_AMPLITUDE   9000   /* of 32767; loud enough indoors, not shrill */
+
+#ifdef CONFIG_LW_BEEP_VOLUME
+#define AUDIO_VOLUME_STEPS CONFIG_LW_BEEP_VOLUME
+#else
+#define AUDIO_VOLUME_STEPS 3
+#endif
+
+/* Amplitude out of a 32767 full scale, one entry per volume step.
+ *
+ * The steps are about 4dB apart rather than evenly spaced, because loudness
+ * is perceived logarithmically: a linear scale crams every usable quiet
+ * setting into its bottom one or two steps and leaves nothing to choose
+ * between. Step 10 is as hard as this amplifier is driven here; step 1 is
+ * roughly a whisper across a room. */
+static const int AUDIO_VOLUME_TABLE[10] = {
+    142, 226, 358, 568, 900, 1427, 2262, 3586, 5684, 9000
+};
+
+#define AUDIO_AMPLITUDE (AUDIO_VOLUME_TABLE[AUDIO_VOLUME_STEPS - 1])
 
 static i2c_master_dev_handle_t s_aw88298;
 static i2s_chan_handle_t       s_tx;
@@ -138,7 +157,8 @@ esp_err_t bsp_audio_init(void)
     }
 
     s_ready = true;
-    ESP_LOGI(TAG, "AW88298 up (%d Hz)", AUDIO_SAMPLE_RATE);
+    ESP_LOGI(TAG, "AW88298 up (%d Hz, volume %d/10, amplitude %d)",
+             AUDIO_SAMPLE_RATE, AUDIO_VOLUME_STEPS, AUDIO_AMPLITUDE);
     return ESP_OK;
 }
 
