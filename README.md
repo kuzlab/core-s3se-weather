@@ -206,9 +206,29 @@ Kconfig には浮動小数点型がないため、mm の値は 100倍の整数�
 | I2S DOUT/DIN | DOUT=14 / DIN=13 | DOUT=13 / DIN=14 | M5Unified の実コードに合わせた。仕様書自身が記載の揺れを認めている |
 | 起動時の表示 | 規定なし | Wi-Fi の失敗理由を画面に名指し | 「接続中」のまま止まる表示はハングと区別がつかないため |
 
-## データ出典
+## データ出典とライセンス
+
+### データ
 
 - 気象予報データ: [Open-Meteo](https://open-meteo.com/) — ライセンス **CC BY 4.0**
 - ナウキャスト（有効化した場合）: [Yahoo! JAPAN Web Services](https://developer.yahoo.co.jp/webapi/map/openlocalplatform/v1/weather.html)
 
 Web Services by Yahoo! JAPAN (https://developer.yahoo.co.jp/about)
+
+### フォント
+
+`components/fonts/` の日本語フォントは **Noto Sans JP** のサブセットで、
+**SIL Open Font License 1.1** に従います。
+詳細は [`components/fonts/NOTICE.md`](components/fonts/NOTICE.md)、
+全文は [`components/fonts/LICENSE-NotoSansJP.txt`](components/fonts/LICENSE-NotoSansJP.txt) を参照。
+
+### 依存コンポーネント
+
+ESP-IDF、LVGL、`esp_lvgl_port`、`esp_lcd_ili9341`、`esp_lcd_touch_ft5x06` は
+Component Manager 経由で取得され、リポジトリには含まれない（`managed_components/` は
+`.gitignore` 対象）。それぞれのライセンスは取得先を参照。
+
+ハードウェアの初期化手順は [m5stack/M5GFX](https://github.com/m5stack/M5GFX) と
+[m5stack/M5Unified](https://github.com/m5stack/M5Unified)、および
+[espressif/esp-bsp](https://github.com/espressif/esp-bsp) のソースを一次情報として
+読み取った。調査結果と出典は [`docs/HARDWARE.md`](docs/HARDWARE.md) に記録している。
