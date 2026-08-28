@@ -1,0 +1,23 @@
+# --- ESP-IDF build artifacts ---
+build/
+managed_components/
+dependencies.lock
+
+# --- Secrets: NEVER commit ---
+# sdkconfig holds Wi-Fi SSID/password and API keys after menuconfig.
+sdkconfig
+sdkconfig.old
+sdkconfig.ci
+# Local overrides for credentials (see README "Wi-Fi / API key setup").
+sdkconfig.defaults.local
+secrets.env
+
+# --- Host-side unit test build ---
+test/build/
+test/test_judge
+
+# --- Editor / OS ---
+.vscode/
+.idea/
+.DS_Store
+*.swp

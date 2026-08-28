@@ -1,0 +1,188 @@
+menu "Laundry Weather"
+
+menu "Wi-Fi"
+
+config LW_WIFI_SSID
+    string "Wi-Fi SSID"
+    default ""
+    help
+        Leave empty here and set it in sdkconfig.defaults.local (gitignored)
+        or via idf.py menuconfig. Never commit a real value.
+
+config LW_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default ""
+    help
+        Same as above: this is a secret, keep it out of version control.
+
+config LW_WIFI_MAX_BACKOFF_SEC
+    int "Reconnect backoff ceiling [s]"
+    default 300
+    range 5 3600
+    help
+        Reconnect attempts back off exponentially up to this interval.
+        The device never reboots to recover a dropped link (SPEC §8.1).
+
+endmenu
+
+menu "Location"
+
+config LW_PLACE_NAME
+    string "Place name shown in the header"
+    default "浦安市"
+
+config LW_LATITUDE_MICRO
+    int "Latitude [microdegrees]"
+    default 35653600
+    help
+        Kconfig has no float type, so coordinates are stored in
+        microdegrees. 35653600 = 35.6536 (Urayasu, Chiba).
+
+config LW_LONGITUDE_MICRO
+    int "Longitude [microdegrees]"
+    default 139901900
+    help
+        139901900 = 139.9019.
+
+endmenu
+
+menu "Thresholds"
+
+config LW_RAIN_MM_X100
+    int "Rain threshold [mm/h x100]"
+    default 20
+    range 0 10000
+    help
+        An hourly slot counts as rainy at or above this precipitation.
+        Stored x100 because Kconfig has no float type: 20 = 0.20 mm.
+
+config LW_RAIN_POP
+    int "Rain threshold, probability [%]"
+    default 50
+    range 0 100
+    help
+        An hourly slot also counts as rainy at or above this probability
+        of precipitation, independent of the millimetre threshold.
+
+config LW_NOWCAST_MM_H_X100
+    int "Nowcast alert threshold [mm/h x100]"
+    default 50
+    range 0 10000
+    help
+        Radar intensity at or above this in the last 60 minutes forces the
+        verdict to at least V_BRING_IN. Stored x100: 50 = 0.50 mm/h.
+
+config LW_BRING_IN_H
+    int "Bring-in horizon [hours]"
+    default 2
+    range 1 24
+    help
+        Rain within this many hours means "bring the laundry in".
+
+config LW_CAUTION_H
+    int "Caution horizon [hours]"
+    default 5
+    range 1 24
+    help
+        Rain within this many hours (but beyond the bring-in horizon)
+        means "short exposure only". Must be greater than the bring-in
+        horizon to have any effect.
+
+endmenu
+
+menu "Update intervals"
+
+config LW_REFRESH_SEC
+    int "Forecast refresh interval [s]"
+    default 600
+    range 60 86400
+
+config LW_NOWCAST_SEC
+    int "Nowcast refresh interval [s]"
+    default 300
+    range 60 86400
+
+endmenu
+
+menu "Weather API"
+
+choice LW_OPENMETEO_MODEL
+    prompt "Open-Meteo forecast model"
+    default LW_OPENMETEO_MODEL_BEST_MATCH
+    help
+        best_match picks the highest-resolution model per location, which
+        in Japan is JMA MSM on a 5km mesh. jma_seamless pins it explicitly.
+
+config LW_OPENMETEO_MODEL_BEST_MATCH
+    bool "best_match"
+
+config LW_OPENMETEO_MODEL_JMA_SEAMLESS
+    bool "jma_seamless"
+
+endchoice
+
+config LW_OPENMETEO_MODEL_NAME
+    string
+    default "best_match" if LW_OPENMETEO_MODEL_BEST_MATCH
+    default "jma_seamless" if LW_OPENMETEO_MODEL_JMA_SEAMLESS
+
+config LW_HTTP_MAX_RESPONSE_BYTES
+    int "Maximum HTTP response size [bytes]"
+    default 32768
+    range 4096 262144
+    help
+        Responses larger than this are truncated and treated as a failed
+        fetch, so a misbehaving endpoint cannot exhaust the heap (SPEC §8.1).
+
+config LW_ENABLE_NOWCAST
+    bool "Enable Yahoo! YOLP nowcast (requires a Client ID)"
+    default n
+    help
+        Adds radar-based precipitation for the next 60 minutes, which is
+        more accurate than the forecast model in the very short term.
+        Off by default so the project builds without any API key.
+
+config LW_YAHOO_CLIENT_ID
+    string "Yahoo! YOLP Client ID"
+    depends on LW_ENABLE_NOWCAST
+    default ""
+    help
+        A secret: set it in sdkconfig.defaults.local, not in the repo.
+
+endmenu
+
+menu "Display"
+
+config LW_BRIGHTNESS_DAY
+    int "Daytime backlight brightness"
+    default 255
+    range 1 255
+
+config LW_BRIGHTNESS_NIGHT
+    int "Night backlight brightness"
+    default 96
+    range 1 255
+    help
+        Note that the backlight is an AXP2101 LDO with only about nine
+        usable steps, so small changes here may have no visible effect.
+
+config LW_NIGHT_START_HOUR
+    int "Night dimming starts at [hour, JST]"
+    default 22
+    range 0 23
+
+config LW_NIGHT_END_HOUR
+    int "Night dimming ends at [hour, JST]"
+    default 6
+    range 0 23
+
+config LW_ENABLE_BEEP
+    bool "Beep when the verdict gets worse"
+    default y
+    help
+        Two short beeps on a transition into "bring in" or "raining" only.
+        Disable if the speaker hardware turns out to be absent or noisy.
+
+endmenu
+
+endmenu

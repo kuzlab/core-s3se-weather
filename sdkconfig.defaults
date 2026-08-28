@@ -1,0 +1,25 @@
+# Target / flash --------------------------------------------------------------
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# PSRAM: CoreS3 SE has 8MB Quad PSRAM. LVGL draw buffers live here.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+
+# Console: CoreS3 SE exposes the ESP32-S3 native USB-Serial-JTAG
+# (VID 0x303a / PID 0x1001), not an external USB-UART bridge.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Tasks / timing --------------------------------------------------------------
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+CONFIG_FREERTOS_HZ=1000
+
+# TLS: certificate verification via the bundled root CA store (SPEC §3.1).
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_ESP_TLS_INSECURE=n
