@@ -49,6 +49,20 @@ static const judge_config_t CFG = {
 static TaskHandle_t s_net_task;
 static TaskHandle_t s_ui_task;
 
+/* Last verdict the user was alerted about. Starts at V_UNKNOWN so the very
+ * first reading never beeps: at power-on nothing has changed yet, and a
+ * device that greets you with an alarm is a device you unplug. */
+static verdict_t s_alerted_verdict = V_UNKNOWN;
+
+/* SPEC §1.4: beep only on the transition into a "bring it in" state, and
+ * only from a state that was previously fine. Staying bad must stay silent. */
+static bool verdict_worsened(verdict_t before, verdict_t after)
+{
+    const bool was_fine = (before == V_OK || before == V_CAUTION);
+    const bool now_bad  = (after == V_BRING_IN || after == V_RAINING);
+    return was_fine && now_bad;
+}
+
 static void init_nvs(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -94,6 +108,7 @@ static void net_task(void *arg)
                 }
 
                 openmeteo_result_t res;
+                verdict_t new_verdict = V_UNKNOWN;
                 const esp_err_t err = openmeteo_fetch(&res);
                 last_fetch_us = esp_timer_get_time();
 
@@ -124,6 +139,7 @@ static void net_task(void *arg)
                                  st->judge.hours_to_rain,
                                  (double)st->judge.rain_total_mm,
                                  st->judge.rain_peak_pop);
+                        new_verdict = st->judge.verdict;
                     } else {
                         /* Keep the previous slots on screen. Only the header
                          * changes, to show the last success (SPEC §8.1). */
@@ -132,6 +148,18 @@ static void net_task(void *arg)
                     app_state_unlock();
                 }
                 xTaskNotifyGive(s_ui_task);
+
+#if CONFIG_LW_ENABLE_BEEP
+                if (verdict_worsened(s_alerted_verdict, new_verdict)) {
+                    ESP_LOGI(TAG, "verdict worsened %s -> %s; alerting",
+                             judge_verdict_label(s_alerted_verdict),
+                             judge_verdict_label(new_verdict));
+                    bsp_beep_alert();
+                }
+#endif
+                if (new_verdict != V_UNKNOWN) {
+                    s_alerted_verdict = new_verdict;
+                }
             }
         }
 
@@ -300,7 +328,10 @@ static void render(void)
 
 static void ui_task(void *arg)
 {
-    int64_t last_heap_log_us = 0;
+    /* Negative so the first pass logs immediately: waiting HEAP_LOG_SEC for
+     * the first sample leaves the early minutes -- when allocation problems
+     * actually show up -- with no record at all. */
+    int64_t last_heap_log_us = -(int64_t)HEAP_LOG_SEC * 1000000;
 
     while (true) {
         render();
@@ -363,6 +394,14 @@ void app_main(void)
 
     ESP_ERROR_CHECK(ui_start(panel, io, touch));
     ui_set_tap_cb(on_tap);
+
+#if CONFIG_LW_ENABLE_BEEP
+    /* Sound is a secondary feature; a failure here must not stop the
+     * display, which is the actual product (SPEC §4.2). */
+    if (bsp_audio_init() != ESP_OK) {
+        ESP_LOGW(TAG, "audio unavailable; verdict changes will be silent");
+    }
+#endif
     ESP_ERROR_CHECK(bsp_backlight_set(CONFIG_LW_BRIGHTNESS_DAY));
 
     if (wifi_start() != ESP_OK) {

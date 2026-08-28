@@ -76,6 +76,14 @@ esp_err_t bsp_display_fill(esp_lcd_panel_handle_t panel, uint16_t rgb565);
  * (SPEC §4.2). */
 esp_err_t bsp_touch_init(esp_lcd_touch_handle_t *out_touch);
 
+/* Speaker via the AW88298. Optional: if this fails the display is
+ * unaffected and bsp_audio_available() stays false (SPEC §4.2). */
+esp_err_t bsp_audio_init(void);
+bool      bsp_audio_available(void);
+
+/* Two short rising notes, played when the verdict gets worse (SPEC §1.4). */
+esp_err_t bsp_beep_alert(void);
+
 /* Probes every 7-bit address and logs what answered. Milestone 1's check. */
 void bsp_i2c_scan_log(void);
 
