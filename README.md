@@ -215,6 +215,11 @@ Kconfig には浮動小数点型がないため、mm の値は 100倍の整数�
 
 Web Services by Yahoo! JAPAN (https://developer.yahoo.co.jp/about)
 
+### このリポジトリ
+
+コードとドキュメントは **MIT License**（[`LICENSE`](LICENSE)）。
+ただし以下のフォントは別ライセンスなので注意。
+
 ### フォント
 
 `components/fonts/` の日本語フォントは **Noto Sans JP** のサブセットで、
