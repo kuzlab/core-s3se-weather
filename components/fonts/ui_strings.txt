@@ -1,0 +1,39 @@
+# Every Japanese string the UI can display.
+#
+# generate.sh derives the font subset from this file, so a string that is
+# not listed here will render as boxes on the device. When you change or add
+# UI wording, add it here and re-run generate.sh.
+#
+# Lines starting with '#' and blank lines are ignored. ASCII is always
+# included, so only the Japanese text matters.
+
+# --- header ---
+浦安市
+更新
+失敗
+同期待ち
+
+# --- verdict banner (SPEC §1.2) ---
+干してOK
+短時間なら可
+まもなく取り込め
+取り込め
+データなし
+
+# --- summary lines ---
+あと約
+時間で降り出します
+今降っています
+時間以内に雨の予報はありません
+最大
+直近
+分レーダー
+時間表示
+雨量
+確率
+
+# --- status / errors ---
+取得失敗
+接続中
+時刻待ち
+起動中

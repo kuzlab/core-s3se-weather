@@ -24,3 +24,4 @@ test/test_judge
 
 # Host test debug symbols
 test/*.dSYM/
+NotoSansJP-Regular.otf
