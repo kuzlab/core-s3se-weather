@@ -5,6 +5,7 @@
 #include <time.h>
 
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "lw_fonts.h"
@@ -82,6 +83,21 @@ static const char *TAG = "ui";
  * has actually happened here. A bounded wait turns "this task is gone" into
  * "this update was skipped", which the stall watchdog can then act on. */
 #define UI_LOCK_TIMEOUT_MS 1000
+
+/* Draw buffer height in lines. Full-frame double buffering was extravagant:
+ * LVGL only ever renders the invalidated area, so the extra size bought
+ * nothing while a full-screen flush became a single 150KB transfer. Forty
+ * lines covers the tallest element on this layout (the verdict banner) in
+ * one pass. */
+#define DRAW_BUF_LINES 40
+
+static void log_internal_heap(const char *stage)
+{
+    ESP_LOGI(TAG, "internal RAM %s: %u free, largest block %u",
+             stage,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+}
 
 static void log_lock_timeout(const char *what)
 {
@@ -373,15 +389,19 @@ esp_err_t ui_start(esp_lcd_panel_handle_t panel,
 {
     ESP_RETURN_ON_FALSE(panel != NULL && io != NULL, ESP_ERR_INVALID_ARG, TAG, "no panel");
 
+    log_internal_heap("ui_start entry");
+
     const lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     ESP_RETURN_ON_ERROR(lvgl_port_init(&port_cfg), TAG, "lvgl_port_init failed");
+    log_internal_heap("after lvgl_port_init");
 
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle     = io,
         .panel_handle  = panel,
-        /* Full-frame buffers in PSRAM: there is 8MB and only ~300KB is
-         * needed, so there is no reason to redraw in narrow strips. */
-        .buffer_size   = SCREEN_W * SCREEN_H,
+        /* Partial buffers, in PSRAM. Internal RAM is the scarce resource on
+         * this board and Wi-Fi needs tens of kilobytes of it after this
+         * runs, so nothing here may be sized "because there is room". */
+        .buffer_size   = SCREEN_W * DRAW_BUF_LINES,
         .double_buffer = true,
         .hres          = SCREEN_W,
         .vres          = SCREEN_H,
@@ -403,6 +423,7 @@ esp_err_t ui_start(esp_lcd_panel_handle_t panel,
     };
     lv_display_t *disp = lvgl_port_add_disp(&disp_cfg);
     ESP_RETURN_ON_FALSE(disp != NULL, ESP_FAIL, TAG, "lvgl_port_add_disp failed");
+    log_internal_heap("after add_disp");
 
     if (touch != NULL) {
         const lvgl_port_touch_cfg_t touch_cfg = {
@@ -414,12 +435,15 @@ esp_err_t ui_start(esp_lcd_panel_handle_t panel,
         }
     }
 
+    log_internal_heap("after add_touch");
+
     if (lvgl_port_lock(0)) {
         build_screen();
         lvgl_port_unlock();
     } else {
         return ESP_ERR_TIMEOUT;
     }
+    log_internal_heap("after build_screen");
 
     ESP_LOGI(TAG, "started");
     return ESP_OK;

@@ -158,36 +158,75 @@ esp_err_t wifi_start(void)
         return ESP_ERR_NO_MEM;
     }
 
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
+    /* No ESP_ERROR_CHECK anywhere in here. Wi-Fi init fails when internal RAM
+     * is short, and aborting turns that into a reboot loop -- the single
+     * worst failure mode for a device that is supposed to sit on a shelf.
+     * Failing softly leaves the screen up saying it cannot connect, which is
+     * something the owner can actually act on. */
+    esp_err_t err = esp_netif_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_netif_init failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    err = esp_event_loop_create_default();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "event loop create failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    if (esp_netif_create_default_wifi_sta() == NULL) {
+        ESP_LOGE(TAG, "could not create the STA netif");
+        return ESP_FAIL;
+    }
 
     const wifi_init_config_t init_cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&init_cfg));
+    err = esp_wifi_init(&init_cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_init failed: %s -- not enough internal RAM?",
+                 esp_err_to_name(err));
+        return err;
+    }
 
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi_event, NULL, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi_event, NULL, NULL));
+    err = esp_event_handler_instance_register(
+        WIFI_EVENT, ESP_EVENT_ANY_ID, on_wifi_event, NULL, NULL);
+    if (err == ESP_OK) {
+        err = esp_event_handler_instance_register(
+            IP_EVENT, IP_EVENT_STA_GOT_IP, on_wifi_event, NULL, NULL);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "event handler register failed: %s", esp_err_to_name(err));
+        return err;
+    }
 
     wifi_config_t wifi_cfg = { 0 };
     strlcpy((char *)wifi_cfg.sta.ssid, CONFIG_LW_WIFI_SSID, sizeof(wifi_cfg.sta.ssid));
     strlcpy((char *)wifi_cfg.sta.password, CONFIG_LW_WIFI_PASSWORD, sizeof(wifi_cfg.sta.password));
     wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg));
-
-    /* Keep the radio awake: a display that updates on a timer has no use for
-     * power save, and modem sleep adds latency to every fetch. */
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+    err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (err == ESP_OK) {
+        err = esp_wifi_set_config(WIFI_IF_STA, &wifi_cfg);
+    }
+    if (err == ESP_OK) {
+        /* Keep the radio awake: a display that updates on a timer has no use
+         * for power save, and modem sleep adds latency to every fetch. */
+        err = esp_wifi_set_ps(WIFI_PS_NONE);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Wi-Fi configuration failed: %s", esp_err_to_name(err));
+        return err;
+    }
 
     if (xTaskCreate(retry_task, "wifi_retry", 3072, NULL, 4, &s_retry_task) != pdPASS) {
+        ESP_LOGE(TAG, "could not create the Wi-Fi retry task");
         return ESP_ERR_NO_MEM;
     }
 
     s_ui_state = WIFI_UI_CONNECTING;
-    ESP_ERROR_CHECK(esp_wifi_start());
+    err = esp_wifi_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_wifi_start failed: %s", esp_err_to_name(err));
+        return err;
+    }
     ESP_LOGI(TAG, "starting, ssid \"%s\"", CONFIG_LW_WIFI_SSID);
     return ESP_OK;
 }

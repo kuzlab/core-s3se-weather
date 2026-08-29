@@ -70,6 +70,18 @@ static bool verdict_worsened(verdict_t before, verdict_t after)
     return was_fine && now_bad;
 }
 
+/* Internal RAM is the scarce resource on this board -- PSRAM makes the
+ * combined figure useless -- so each startup step reports what it left
+ * behind. The largest free block matters more than the total, because that
+ * is what an allocation actually needs. */
+static void log_internal_heap(const char *stage)
+{
+    ESP_LOGI(TAG, "internal RAM %s: %u free, largest block %u",
+             stage,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+}
+
 static void init_nvs(void)
 {
     esp_err_t err = nvs_flash_init();
@@ -420,6 +432,7 @@ void app_main(void)
              CONFIG_LW_PLACE_NAME, (int)esp_reset_reason());
 
     init_nvs();
+    log_internal_heap("at boot");
     ESP_ERROR_CHECK(app_state_init());
     ESP_ERROR_CHECK(bsp_init());
 
@@ -437,8 +450,11 @@ void app_main(void)
         touch = NULL;
     }
 
+    log_internal_heap("after display");
+
     ESP_ERROR_CHECK(ui_start(panel, io, touch));
     ui_set_tap_cb(on_tap);
+    log_internal_heap("after LVGL");
 
 #if CONFIG_LW_ENABLE_BEEP
     /* Sound is a secondary feature; a failure here must not stop the
@@ -455,17 +471,43 @@ void app_main(void)
 #endif
     ESP_ERROR_CHECK(bsp_backlight_set(CONFIG_LW_BRIGHTNESS_DAY));
 
-    if (wifi_start() != ESP_OK) {
-        ESP_LOGE(TAG, "Wi-Fi could not start; the display will show no data");
-    }
+    log_internal_heap("before tasks");
 
-    xTaskCreate(ui_task, "ui", UI_TASK_STACK, NULL, UI_TASK_PRIO, &s_ui_task);
-    xTaskCreate(net_task, "net", NET_TASK_STACK, NULL, NET_TASK_PRIO, &s_net_task);
+    /* Created before Wi-Fi starts. The Wi-Fi stack takes tens of kilobytes of
+     * internal RAM, and these two want 8KB of stack each; starting Wi-Fi
+     * first left too little for them, and xTaskCreate failing was invisible
+     * because its result was ignored. The display then sat on its startup
+     * banner forever with no task left to update it. */
+    if (xTaskCreate(ui_task, "ui", UI_TASK_STACK, NULL, UI_TASK_PRIO, &s_ui_task) != pdPASS) {
+        ESP_LOGE(TAG, "could not create the UI task -- restarting");
+        log_internal_heap("at failure");
+        vTaskDelay(pdMS_TO_TICKS(200));
+        esp_restart();
+    }
+    if (xTaskCreate(net_task, "net", NET_TASK_STACK, NULL, NET_TASK_PRIO, &s_net_task) != pdPASS) {
+        ESP_LOGE(TAG, "could not create the network task -- restarting");
+        log_internal_heap("at failure");
+        vTaskDelay(pdMS_TO_TICKS(200));
+        esp_restart();
+    }
 #if CONFIG_LW_UI_STALL_RESTART_SEC > 0
     /* Higher priority than the tasks it supervises, so a busy or blocked
      * system cannot starve the one thing that can recover it. */
-    xTaskCreate(stall_watchdog_task, "stall_wd", 3072, NULL, NET_TASK_PRIO + 1, NULL);
+    if (xTaskCreate(stall_watchdog_task, "stall_wd", 3072, NULL,
+                    NET_TASK_PRIO + 1, NULL) != pdPASS) {
+        /* Losing the watchdog is survivable; losing it silently is not. */
+        ESP_LOGE(TAG, "could not create the stall watchdog; running unsupervised");
+    }
 #endif
 
-    ESP_LOGI(TAG, "tasks started");
+    log_internal_heap("after tasks");
+
+    if (wifi_start() != ESP_OK) {
+        /* Not fatal on purpose: the screen stays up and says it cannot
+         * connect, which beats a reboot loop the owner cannot diagnose. */
+        ESP_LOGE(TAG, "Wi-Fi could not start; the display will show no data");
+    }
+
+    log_internal_heap("after Wi-Fi");
+    ESP_LOGI(TAG, "startup complete");
 }

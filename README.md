@@ -220,8 +220,33 @@ Thread 3 "taskLVGL":  CPU1 PC = wait_for_flushing + 40   ← ロックを保持�
 Thread 9 "ui":        lvgl_port_lock(0) で無限待ち (xTicksToWait = 4294967295)
 ```
 
-**なぜ完了通知が失われたのかは未特定。** 内部 RAM の逼迫（最小 32KB まで
-落ちることがある）や PSRAM からの DMA 転送が疑わしい。
+**なぜ完了通知が失われたのかは未特定。** ただし当時は内部 RAM が最小 32KB まで
+落ちており、後述の描画バッファ縮小でこれが 120KB 以上に改善している。
+同じ根から来ていた可能性が高い。
+
+### 描画バッファは PSRAM 指定でも内部 RAM を消費する
+
+`esp_lvgl_port` に `buff_spiram = true` を渡していても、**描画バッファ1面分に
+相当する内部 RAM が別途確保される**（実測）。
+
+全画面ダブルバッファ（320x240）にしていたときの実測値:
+
+```
+internal RAM after display: 232,599 free
+internal RAM after LVGL:     71,119 free   ← 161,480 バイト消費
+→ E wifi: Expected to init 10 rx buffer, actual is 4   （Wi-Fi 初期化が失敗）
+```
+
+40行バッファに縮小した後:
+
+```
+internal RAM after lvgl_port_init: 225,555 free
+internal RAM after add_disp:       199,891 free   ← 25,664 バイト（バッファ1面分とほぼ一致）
+internal RAM after Wi-Fi:          120,567 free / 最大ブロック 47,104
+```
+
+**LVGL は無効化された領域しか描画しない**ので、バッファを大きくしても得るものはない。
+「PSRAM に余裕があるから」でサイズを決めてはいけない。
 
 **対処:**
 
