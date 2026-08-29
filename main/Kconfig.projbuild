@@ -176,6 +176,24 @@ config LW_NIGHT_END_HOUR
     default 6
     range 0 23
 
+config LW_UI_STALL_RESTART_SEC
+    int "Restart if the screen stops updating for this long [s]"
+    default 300
+    range 0 3600
+    help
+        0 disables the check.
+
+        The UI redraws at least once a minute. If it has not managed to for
+        this long, something is wedged and there is no way back from inside:
+        the LVGL task can spin forever waiting for an LCD transfer that never
+        reports completion, holding the lock every other path needs, and no
+        watchdog fires because the idle tasks keep running.
+
+        Rebooting is a blunt recovery, and SPEC §8.1 rightly says not to use
+        it to paper over a dropped Wi-Fi link. A genuine deadlock is a
+        different case: a device left powered on that freezes until a person
+        unplugs it is the worst outcome available.
+
 config LW_ENABLE_BEEP
     bool "Beep when the verdict gets worse"
     default y

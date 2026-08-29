@@ -34,10 +34,12 @@ static const char *TAG = "main";
 #define UI_TASK_PRIO   4
 
 #define UI_TICK_MS     60000   /* re-render at least once a minute */
-#define HEAP_LOG_SEC   300
+#define HEAP_LOG_SEC   60
 
 #define FETCH_RETRY_START_SEC 30
 #define FETCH_RETRY_MAX_SEC   300
+
+#define STALL_CHECK_INTERVAL_MS 5000
 
 static const judge_config_t CFG = {
     .rain_mm    = CONFIG_LW_RAIN_MM_X100 / 100.0f,
@@ -48,6 +50,11 @@ static const judge_config_t CFG = {
 
 static TaskHandle_t s_net_task;
 static TaskHandle_t s_ui_task;
+
+/* Seconds of uptime at the last completed render. 32-bit so it is written
+ * and read atomically on this CPU; the stall watchdog only needs it to the
+ * second. */
+static volatile uint32_t s_last_render_sec;
 
 /* Last verdict the user was alerted about. Starts at V_UNKNOWN so the very
  * first reading never beeps: at power-on nothing has changed yet, and a
@@ -335,6 +342,10 @@ static void ui_task(void *arg)
 
     while (true) {
         render();
+        /* Stamped only after render() returns. Every path that can wedge --
+         * the LVGL lock above all -- is inside it, so a stale stamp is
+         * exactly the condition the stall watchdog is looking for. */
+        s_last_render_sec = (uint32_t)(esp_timer_get_time() / 1000000);
 
         if (esp_timer_get_time() - last_heap_log_us >= (int64_t)HEAP_LOG_SEC * 1000000) {
             /* Internal RAM is reported separately because the total is
@@ -356,6 +367,39 @@ static void ui_task(void *arg)
     }
 }
 
+/* ------------------------------------------------------- stall watchdog --- */
+
+#if CONFIG_LW_UI_STALL_RESTART_SEC > 0
+/* Deliberately its own task with no dependencies: it must stay alive when
+ * every other task is stuck. It takes no locks, does no I/O, and touches
+ * only one 32-bit counter. */
+static void stall_watchdog_task(void *arg)
+{
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(STALL_CHECK_INTERVAL_MS));
+
+        const uint32_t now_sec = (uint32_t)(esp_timer_get_time() / 1000000);
+        const uint32_t last = s_last_render_sec;
+        if (last == 0) {
+            continue;  /* the UI has not rendered even once yet */
+        }
+
+        const uint32_t stalled_for = now_sec - last;
+        if (stalled_for >= CONFIG_LW_UI_STALL_RESTART_SEC) {
+            ESP_LOGE(TAG, "UI has not redrawn for %u s (limit %d s) -- restarting",
+                     (unsigned)stalled_for, CONFIG_LW_UI_STALL_RESTART_SEC);
+            ESP_LOGE(TAG, "heap at stall: internal %u free, largest block %u",
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+            /* Give the log a moment to drain before the reset takes the
+             * console with it. */
+            vTaskDelay(pdMS_TO_TICKS(200));
+            esp_restart();
+        }
+    }
+}
+#endif
+
 static void on_tap(int new_range_hours)
 {
     /* Runs inside LVGL's event handler, so it only signals: the refetch and
@@ -372,7 +416,8 @@ static void on_tap(int new_range_hours)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "laundry-weather starting (%s)", CONFIG_LW_PLACE_NAME);
+    ESP_LOGI(TAG, "laundry-weather starting (%s), reset reason %d",
+             CONFIG_LW_PLACE_NAME, (int)esp_reset_reason());
 
     init_nvs();
     ESP_ERROR_CHECK(app_state_init());
@@ -416,6 +461,11 @@ void app_main(void)
 
     xTaskCreate(ui_task, "ui", UI_TASK_STACK, NULL, UI_TASK_PRIO, &s_ui_task);
     xTaskCreate(net_task, "net", NET_TASK_STACK, NULL, NET_TASK_PRIO, &s_net_task);
+#if CONFIG_LW_UI_STALL_RESTART_SEC > 0
+    /* Higher priority than the tasks it supervises, so a busy or blocked
+     * system cannot starve the one thing that can recover it. */
+    xTaskCreate(stall_watchdog_task, "stall_wd", 3072, NULL, NET_TASK_PRIO + 1, NULL);
+#endif
 
     ESP_LOGI(TAG, "tasks started");
 }

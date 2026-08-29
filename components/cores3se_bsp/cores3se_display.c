@@ -24,6 +24,14 @@ static const char *TAG = "bsp.lcd";
 /* One full row of RGB565 pixels is the unit bsp_display_fill() pushes. */
 #define LCD_FILL_ROWS       16
 
+/* The SPI bus has to be sized for the largest single transfer anyone will
+ * make over it, which is a full-frame LVGL flush -- not the small strips
+ * bsp_display_fill() uses. Sizing it to the strip made esp_lcd split every
+ * full-screen flush into fifteen chunked transactions, multiplying the
+ * chances of losing a completion, and LVGL waits for that completion in an
+ * untimed busy loop while holding its lock. */
+#define LCD_MAX_TRANSFER_SZ (BSP_LCD_H_RES * BSP_LCD_V_RES * (int)sizeof(uint16_t))
+
 static esp_lcd_panel_handle_t    s_panel;
 static esp_lcd_panel_io_handle_t s_io;
 
@@ -45,7 +53,7 @@ esp_err_t bsp_display_init(esp_lcd_panel_handle_t *out_panel,
         .sclk_io_num     = BSP_LCD_SCLK_GPIO,
         .quadwp_io_num   = GPIO_NUM_NC,
         .quadhd_io_num   = GPIO_NUM_NC,
-        .max_transfer_sz = BSP_LCD_H_RES * LCD_FILL_ROWS * (int)sizeof(uint16_t),
+        .max_transfer_sz = LCD_MAX_TRANSFER_SZ,
     };
     ESP_RETURN_ON_ERROR(spi_bus_initialize(BSP_LCD_SPI_HOST, &bus_cfg, SPI_DMA_CH_AUTO),
                         TAG, "SPI bus init failed");

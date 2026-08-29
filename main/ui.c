@@ -76,6 +76,18 @@ static const char *TAG = "ui";
 #define N_DROPS          3
 #define DROP_FALL_MS     900
 
+/* Never wait forever for the LVGL lock. esp_lvgl_port treats 0 as
+ * portMAX_DELAY, and the LVGL task can hold the lock indefinitely if it is
+ * stuck waiting for an LCD transfer that never reports completion -- which
+ * has actually happened here. A bounded wait turns "this task is gone" into
+ * "this update was skipped", which the stall watchdog can then act on. */
+#define UI_LOCK_TIMEOUT_MS 1000
+
+static void log_lock_timeout(const char *what)
+{
+    ESP_LOGE(TAG, "LVGL lock timed out in %s -- the LVGL task is not releasing it", what);
+}
+
 static lv_obj_t *s_place_label;
 static lv_obj_t *s_status_label;
 static lv_obj_t *s_banner;
@@ -420,7 +432,8 @@ void ui_set_tap_cb(ui_tap_cb_t cb)
 
 void ui_set_header(const char *place, const char *status)
 {
-    if (!lvgl_port_lock(0)) {
+    if (!lvgl_port_lock(UI_LOCK_TIMEOUT_MS)) {
+        log_lock_timeout("ui_set_header");
         return;
     }
     if (place != NULL) {
@@ -434,7 +447,8 @@ void ui_set_header(const char *place, const char *status)
 
 void ui_set_verdict(verdict_t v)
 {
-    if (!lvgl_port_lock(0)) {
+    if (!lvgl_port_lock(UI_LOCK_TIMEOUT_MS)) {
+        log_lock_timeout("ui_set_verdict");
         return;
     }
     lv_obj_set_style_bg_color(s_banner, lv_color_hex(verdict_bg(v)), 0);
@@ -446,7 +460,8 @@ void ui_set_verdict(verdict_t v)
 
 void ui_set_summary(const char *line1, const char *line2)
 {
-    if (!lvgl_port_lock(0)) {
+    if (!lvgl_port_lock(UI_LOCK_TIMEOUT_MS)) {
+        log_lock_timeout("ui_set_summary");
         return;
     }
     lv_label_set_text(s_summary1, line1 != NULL ? line1 : "");
@@ -456,7 +471,8 @@ void ui_set_summary(const char *line1, const char *line2)
 
 void ui_set_nowcast(float max_mm_h)
 {
-    if (!lvgl_port_lock(0)) {
+    if (!lvgl_port_lock(UI_LOCK_TIMEOUT_MS)) {
+        log_lock_timeout("ui_set_nowcast");
         return;
     }
     if (max_mm_h < 0.0f) {
@@ -508,7 +524,8 @@ void ui_set_graph(const hour_slot_t *slots, int n_slots, int start,
     const int bar_pitch = GRAPH_W / hours;
     const int bar_w = (bar_pitch > 2) ? bar_pitch - 1 : 1;
 
-    if (!lvgl_port_lock(0)) {
+    if (!lvgl_port_lock(UI_LOCK_TIMEOUT_MS)) {
+        log_lock_timeout("ui_set_graph");
         return;
     }
 
