@@ -41,6 +41,14 @@ static const char *TAG = "main";
 
 #define STALL_CHECK_INTERVAL_MS 5000
 
+static const outlook_config_t OUTLOOK_CFG = {
+    .morning_start_hour = CONFIG_LW_MORNING_START_HOUR,
+    .day_start_hour     = CONFIG_LW_DAY_START_HOUR,
+    .night_start_hour   = CONFIG_LW_NIGHT_START_HOUR_OUTLOOK,
+    .dry_start_hour     = CONFIG_LW_DRY_START_HOUR,
+    .dry_end_hour       = CONFIG_LW_DRY_END_HOUR,
+};
+
 static const judge_config_t CFG = {
     .rain_mm    = CONFIG_LW_RAIN_MM_X100 / 100.0f,
     .rain_pop   = CONFIG_LW_RAIN_POP,
@@ -169,11 +177,27 @@ static void net_task(void *arg)
                 xTaskNotifyGive(s_ui_task);
 
 #if CONFIG_LW_ENABLE_BEEP
+                /* Only during the hours when laundry might actually be
+                 * hanging. An alert that means "bring it in" is noise at
+                 * 10am before anything has been hung, and worse at 2am. */
+                struct tm lt;
+                const time_t alert_now = time(NULL);
+                localtime_r(&alert_now, &lt);
+                const bool hanging_hours =
+                    (judge_outlook(lt.tm_hour, &OUTLOOK_CFG) == OUTLOOK_NOW);
+
                 if (verdict_worsened(s_alerted_verdict, new_verdict)) {
-                    ESP_LOGI(TAG, "verdict worsened %s -> %s; alerting",
-                             judge_verdict_label(s_alerted_verdict),
-                             judge_verdict_label(new_verdict));
-                    bsp_beep_alert();
+                    if (hanging_hours) {
+                        ESP_LOGI(TAG, "verdict worsened %s -> %s; alerting",
+                                 judge_verdict_label(s_alerted_verdict),
+                                 judge_verdict_label(new_verdict));
+                        bsp_beep_alert();
+                    } else {
+                        ESP_LOGI(TAG, "verdict worsened %s -> %s; staying quiet "
+                                      "outside the hours laundry hangs",
+                                 judge_verdict_label(s_alerted_verdict),
+                                 judge_verdict_label(new_verdict));
+                    }
                 }
 #endif
                 if (new_verdict != V_UNKNOWN) {
@@ -291,6 +315,72 @@ static void apply_night_dimming(void)
     }
 }
 
+/* Wording for the two planning outlooks. The daytime outlook keeps the
+ * original phrasing, which ui.c supplies when text is NULL. */
+static const char *planning_banner(outlook_t outlook, verdict_t v, bool tomorrow)
+{
+    if (outlook == OUTLOOK_TODAY) {
+        switch (v) {
+            case V_OK:       return "きょうは ほしどき";
+            case V_CAUTION:  return "みじかめなら OK";
+            case V_BRING_IN: return "きょうは へやぼし";
+            case V_RAINING:  return "いま あめです";
+            default:         return NULL;
+        }
+    }
+
+    /* After 20:00 the next daylight is tomorrow's; in the small hours it is
+     * later the same calendar day, and calling that "tomorrow" would be
+     * wrong to anyone reading it at 2am. */
+    if (tomorrow) {
+        switch (v) {
+            case V_OK:       return "あした ほせそう";
+            case V_CAUTION:  return "あした びみょう";
+            case V_BRING_IN: return "あした きびしそう";
+            case V_RAINING:  return "あした あめ";
+            default:         return NULL;
+        }
+    }
+    switch (v) {
+        case V_OK:       return "きょう ほせそう";
+        case V_CAUTION:  return "きょう びみょう";
+        case V_BRING_IN: return "きょう きびしそう";
+        case V_RAINING:  return "きょう あめ";
+        default:         return NULL;
+    }
+}
+
+static void planning_summary(const window_judgement_t *w, outlook_t outlook,
+                             bool tomorrow, time_t window_end,
+                             char *l1, size_t l1_len, char *l2, size_t l2_len)
+{
+    struct tm tm_end;
+    localtime_r(&window_end, &tm_end);
+
+    if (!w->has_rain) {
+        if (outlook == OUTLOOK_TODAY) {
+            snprintf(l1, l1_len, "☀ %d時まで だいじょうぶそう", tm_end.tm_hour);
+        } else {
+            snprintf(l1, l1_len, "☀ %sの ひるまは よさそう", tomorrow ? "あした" : "きょう");
+        }
+        return;
+    }
+
+    struct tm tm_s, tm_e;
+    localtime_r(&w->rain_start, &tm_s);
+    localtime_r(&w->rain_end, &tm_e);
+    snprintf(l1, l1_len, "☂ %02d:%02d〜%02d:%02d  %.1fmm  さいだい%d%%",
+             tm_s.tm_hour, tm_s.tm_min, tm_e.tm_hour, tm_e.tm_min,
+             (double)w->total_mm, w->peak_pop);
+
+    if (outlook == OUTLOOK_TODAY) {
+        snprintf(l2, l2_len, "%d時ごろから あめ", tm_s.tm_hour);
+    } else {
+        snprintf(l2, l2_len, "%sの %d時ごろ あめ",
+                 tomorrow ? "あした" : "きょう", tm_s.tm_hour);
+    }
+}
+
 static void render(void)
 {
     app_state_t st;
@@ -317,12 +407,41 @@ static void render(void)
     }
     ui_set_header(CONFIG_LW_PLACE_NAME, status);
 
-    ui_set_verdict(st.judge.verdict);
+    char l1[96];
+    char l2[96];
+    l1[0] = '\0';
+    l2[0] = '\0';
 
-    char l1[80];
-    char l2[80];
-    format_summary(&st, l1, sizeof(l1), l2, sizeof(l2));
-    ui_set_summary(l1, l2);
+    /* Which question the screen is answering depends on the clock. Being
+     * told to bring the laundry in at 10am, before any has been hung, is
+     * noise; at 10pm what matters is whether tomorrow will work. */
+    bool handled = false;
+    if (time_is_valid() && st.n_slots > 0 && st.judge.verdict != V_UNKNOWN) {
+        const time_t now = time(NULL);
+        struct tm lt;
+        localtime_r(&now, &lt);
+
+        const outlook_t outlook = judge_outlook(lt.tm_hour, &OUTLOOK_CFG);
+        if (outlook != OUTLOOK_NOW) {
+            time_t from = 0, to = 0;
+            judge_outlook_window(outlook, now, &OUTLOOK_CFG, &from, &to);
+            const window_judgement_t w = judge_window(st.slots, st.n_slots, from, to, &CFG);
+
+            if (w.verdict != V_UNKNOWN) {
+                const bool tomorrow = (lt.tm_hour >= CONFIG_LW_NIGHT_START_HOUR_OUTLOOK);
+                ui_set_verdict(w.verdict, planning_banner(outlook, w.verdict, tomorrow));
+                planning_summary(&w, outlook, tomorrow, to, l1, sizeof(l1), l2, sizeof(l2));
+                ui_set_summary(l1, l2);
+                handled = true;
+            }
+        }
+    }
+
+    if (!handled) {
+        ui_set_verdict(st.judge.verdict, NULL);
+        format_summary(&st, l1, sizeof(l1), l2, sizeof(l2));
+        ui_set_summary(l1, l2);
+    }
 
     ui_set_nowcast(st.nowcast_max_mm_h);
 

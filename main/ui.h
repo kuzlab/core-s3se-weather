@@ -32,7 +32,10 @@ void ui_set_tap_cb(ui_tap_cb_t cb);
 /* Header: place name on the left, "更新 HH:MM" / "失敗 HH:MM" on the right. */
 void ui_set_header(const char *place, const char *status);
 
-void ui_set_verdict(verdict_t v);
+/* The verdict picks the colour; the wording comes from the caller, because
+ * what to say depends on the time of day and that is not the UI's decision
+ * to make. Pass NULL for the plain daytime wording. */
+void ui_set_verdict(verdict_t v, const char *text);
 
 /* The two summary lines under the banner. Either may be NULL to clear. */
 void ui_set_summary(const char *line1, const char *line2);

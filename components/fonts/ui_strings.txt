@@ -16,7 +16,7 @@
 同期中
 取得中
 
-# --- verdict banner ---
+# --- verdict banner, daytime: should I bring in what is hanging? ---
 # Deliberately gentle: this thing sits in a home and talks to whoever walks
 # past it, so it suggests rather than orders.
 ほしてだいじょうぶ
@@ -24,6 +24,23 @@
 そろそろとりこもう
 あめ！とりこんで
 じゅんびちゅう
+
+# --- verdict banner, morning: can I hang a load today? ---
+# "Bring it in" is meaningless at 10am when nothing has been hung yet.
+きょうは ほしどき
+みじかめなら OK
+きょうは へやぼし
+いま あめです
+
+# --- verdict banner, evening and night: will the next daylight work? ---
+あした ほせそう
+あした びみょう
+あした きびしそう
+あした あめ
+きょう ほせそう
+きょう びみょう
+きょう きびしそう
+きょう あめ
 
 # --- summary lines ---
 さいだい
@@ -33,6 +50,12 @@
 あと
 時間
 レーダー
+時ごろから あめ
+時ごろ あめ
+まで だいじょうぶそう
+ひるまは よさそう
+の
+ゆうがた
 
 # --- status / errors ---
 # These have to name the actual problem. A message that never changes tells

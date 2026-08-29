@@ -86,6 +86,142 @@ judgement_t judge_evaluate(const hour_slot_t *slots, int n_slots,
     return out;
 }
 
+outlook_t judge_outlook(int local_hour, const outlook_config_t *oc)
+{
+    if (oc == NULL) {
+        return OUTLOOK_NOW;
+    }
+    if (local_hour >= oc->night_start_hour || local_hour < oc->morning_start_hour) {
+        return OUTLOOK_TOMORROW;
+    }
+    if (local_hour < oc->day_start_hour) {
+        return OUTLOOK_TODAY;
+    }
+    return OUTLOOK_NOW;
+}
+
+/* Local midnight of the day containing t, as unixtime. */
+static time_t local_midnight(time_t t)
+{
+    struct tm lt;
+    localtime_r(&t, &lt);
+    lt.tm_hour = 0;
+    lt.tm_min  = 0;
+    lt.tm_sec  = 0;
+    lt.tm_isdst = -1;
+    return mktime(&lt);
+}
+
+void judge_outlook_window(outlook_t outlook, time_t now,
+                          const outlook_config_t *oc,
+                          time_t *from, time_t *to)
+{
+    if (from == NULL || to == NULL || oc == NULL) {
+        return;
+    }
+    *from = 0;
+    *to = 0;
+
+    struct tm lt;
+    localtime_r(&now, &lt);
+    const time_t midnight = local_midnight(now);
+
+    switch (outlook) {
+        case OUTLOOK_TODAY:
+            /* From right now, because the question is whether a load hung
+             * now survives the day -- not what the whole day looks like on
+             * average. Ends when the laundry is expected to come in. */
+            *from = now;
+            *to   = midnight + (time_t)oc->dry_end_hour * JUDGE_SLOT_SEC;
+            break;
+
+        case OUTLOOK_TOMORROW: {
+            /* The next daylight stretch that has not happened yet. After
+             * 20:00 that is tomorrow; in the small hours it is later the
+             * same calendar day. */
+            const int day_offset = (lt.tm_hour >= oc->night_start_hour) ? 1 : 0;
+            const time_t base = midnight + (time_t)day_offset * 24 * JUDGE_SLOT_SEC;
+            *from = base + (time_t)oc->dry_start_hour * JUDGE_SLOT_SEC;
+            *to   = base + (time_t)oc->dry_end_hour * JUDGE_SLOT_SEC;
+            break;
+        }
+
+        case OUTLOOK_NOW:
+        default:
+            /* Answered by judge_evaluate(), not by a window. */
+            break;
+    }
+
+    if (*to < *from) {
+        *to = *from;
+    }
+}
+
+window_judgement_t judge_window(const hour_slot_t *slots, int n_slots,
+                                time_t from, time_t to,
+                                const judge_config_t *cfg)
+{
+    window_judgement_t out;
+    memset(&out, 0, sizeof(out));
+    out.verdict = V_UNKNOWN;
+
+    if (slots == NULL || cfg == NULL || n_slots <= 0 || to <= from) {
+        return out;
+    }
+
+    int first_rainy = -1;
+    int last_rainy = -1;
+
+    for (int i = 0; i < n_slots; i++) {
+        /* A slot counts when its hour overlaps the window at all. */
+        const time_t slot_end = slots[i].t + JUDGE_SLOT_SEC;
+        if (slot_end <= from || slots[i].t >= to) {
+            continue;
+        }
+        out.window_hours++;
+
+        if (!judge_is_rainy(&slots[i], cfg)) {
+            continue;
+        }
+        out.rainy_hours++;
+        out.total_mm += slots[i].mm;
+        if (slots[i].pop > out.peak_pop) {
+            out.peak_pop = slots[i].pop;
+        }
+        if (first_rainy < 0) {
+            first_rainy = i;
+        }
+        last_rainy = i;
+    }
+
+    if (out.window_hours == 0) {
+        /* The forecast does not reach this window yet. */
+        return out;
+    }
+
+    if (out.rainy_hours == 0) {
+        out.verdict = V_OK;
+        return out;
+    }
+
+    out.has_rain = true;
+    out.rain_start = slots[first_rainy].t;
+    out.rain_end   = slots[last_rainy].t + JUDGE_SLOT_SEC;
+
+    /* Rain at the very start of the window is the strongest signal: there is
+     * no dry stretch to get ahead of. Otherwise grade by how much of the
+     * window is wet, so one marginal hour late in the day does not read the
+     * same as a washed-out afternoon. */
+    if (slots[first_rainy].t <= from) {
+        out.verdict = V_RAINING;
+    } else if (out.rainy_hours * 3 >= out.window_hours) {
+        out.verdict = V_BRING_IN;
+    } else {
+        out.verdict = V_CAUTION;
+    }
+    return out;
+}
+
 void judge_apply_nowcast(judgement_t *j, float nowcast_max_mm_h, float threshold)
 {
     if (j == NULL || nowcast_max_mm_h < 0.0f) {

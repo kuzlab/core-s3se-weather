@@ -90,6 +90,47 @@ config LW_CAUTION_H
 
 endmenu
 
+menu "Time-of-day framing"
+
+config LW_MORNING_START_HOUR
+    int "Morning outlook starts at [hour]"
+    default 5
+    range 0 23
+    help
+        From here until the daytime hour below, the question on screen is
+        "can I hang a load today?".
+
+config LW_DAY_START_HOUR
+    int "Daytime outlook starts at [hour]"
+    default 12
+    range 0 23
+    help
+        From here until the night hour below, the question is "should I
+        bring in what is hanging?" -- the original behaviour.
+
+config LW_NIGHT_START_HOUR_OUTLOOK
+    int "Evening outlook starts at [hour]"
+    default 20
+    range 0 23
+    help
+        From here until the morning hour above, the question is "will the
+        next daylight be any good?".
+
+config LW_DRY_START_HOUR
+    int "Earliest useful drying hour"
+    default 9
+    range 0 23
+
+config LW_DRY_END_HOUR
+    int "Hour the laundry is expected to be back in"
+    default 17
+    range 1 24
+    help
+        The morning outlook asks whether a load hung now stays dry until
+        this hour; the evening outlook looks at this span on the next day.
+
+endmenu
+
 menu "Update intervals"
 
 config LW_REFRESH_SEC

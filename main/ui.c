@@ -469,7 +469,7 @@ void ui_set_header(const char *place, const char *status)
     lvgl_port_unlock();
 }
 
-void ui_set_verdict(verdict_t v)
+void ui_set_verdict(verdict_t v, const char *text)
 {
     if (!lvgl_port_lock(UI_LOCK_TIMEOUT_MS)) {
         log_lock_timeout("ui_set_verdict");
@@ -477,7 +477,7 @@ void ui_set_verdict(verdict_t v)
     }
     lv_obj_set_style_bg_color(s_banner, lv_color_hex(verdict_bg(v)), 0);
     lv_obj_set_style_text_color(s_banner_label, lv_color_hex(verdict_fg(v)), 0);
-    lv_label_set_text(s_banner_label, verdict_text(v));
+    lv_label_set_text(s_banner_label, (text != NULL) ? text : verdict_text(v));
     set_icon(v);
     lvgl_port_unlock();
 }

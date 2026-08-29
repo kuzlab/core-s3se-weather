@@ -6,7 +6,9 @@
 #include "judge.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static int g_failures = 0;
 static int g_checks = 0;
@@ -240,8 +242,129 @@ static void test_nowcast_override(void)
     CHECK(j.verdict == V_UNKNOWN, "V_UNKNOWN -> %d expected unchanged", j.verdict);
 }
 
+/* ---- outlook selection and windows ---------------------------------- */
+
+static const outlook_config_t OUTLOOK_CFG = {
+    .morning_start_hour = 5,
+    .day_start_hour     = 12,
+    .night_start_hour   = 20,
+    .dry_start_hour     = 9,
+    .dry_end_hour       = 17,
+};
+
+/* Builds a local (JST) timestamp; main() pins TZ so this is deterministic. */
+static time_t jst(int year, int mon, int day, int hour, int min)
+{
+    struct tm t;
+    memset(&t, 0, sizeof(t));
+    t.tm_year = year - 1900;
+    t.tm_mon  = mon - 1;
+    t.tm_mday = day;
+    t.tm_hour = hour;
+    t.tm_min  = min;
+    t.tm_isdst = -1;
+    return mktime(&t);
+}
+
+static void test_outlook_by_hour(void)
+{
+    printf("outlook selection by hour\n");
+    const struct { int hour; outlook_t want; } cases[] = {
+        {  0, OUTLOOK_TOMORROW }, {  4, OUTLOOK_TOMORROW },
+        {  5, OUTLOOK_TODAY },    { 11, OUTLOOK_TODAY },
+        { 12, OUTLOOK_NOW },      { 19, OUTLOOK_NOW },
+        { 20, OUTLOOK_TOMORROW }, { 23, OUTLOOK_TOMORROW },
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+        const outlook_t got = judge_outlook(cases[i].hour, &OUTLOOK_CFG);
+        CHECK(got == cases[i].want, "hour %d -> %d, expected %d",
+              cases[i].hour, got, cases[i].want);
+    }
+}
+
+static void test_outlook_windows(void)
+{
+    printf("outlook windows\n");
+
+    /* Morning: from now until the laundry is expected to be in. */
+    const time_t morning = jst(2026, 8, 29, 10, 19);
+    time_t from = 0, to = 0;
+    judge_outlook_window(OUTLOOK_TODAY, morning, &OUTLOOK_CFG, &from, &to);
+    CHECK(from == morning, "morning window should start now");
+    CHECK(to == jst(2026, 8, 29, 17, 0), "morning window should end at 17:00 today");
+
+    /* Late evening: the next daylight is tomorrow's. */
+    const time_t evening = jst(2026, 8, 29, 22, 30);
+    judge_outlook_window(OUTLOOK_TOMORROW, evening, &OUTLOOK_CFG, &from, &to);
+    CHECK(from == jst(2026, 8, 30, 9, 0), "22:30 -> tomorrow 09:00");
+    CHECK(to == jst(2026, 8, 30, 17, 0), "22:30 -> tomorrow 17:00");
+
+    /* Small hours: the next daylight is later the same calendar day, not
+     * the one after. Getting this wrong would show the wrong day's weather
+     * to anyone awake at 2am. */
+    const time_t small_hours = jst(2026, 8, 30, 2, 0);
+    judge_outlook_window(OUTLOOK_TOMORROW, small_hours, &OUTLOOK_CFG, &from, &to);
+    CHECK(from == jst(2026, 8, 30, 9, 0), "02:00 -> same day 09:00");
+    CHECK(to == jst(2026, 8, 30, 17, 0), "02:00 -> same day 17:00");
+}
+
+static void test_window_judgement(void)
+{
+    printf("window judgement\n");
+
+    hour_slot_t s[48];
+    const time_t base = jst(2026, 8, 29, 0, 0);
+    for (int i = 0; i < 48; i++) {
+        s[i].t   = base + (time_t)i * JUDGE_SLOT_SEC;
+        s[i].mm  = 0.0f;
+        s[i].pop = 0;
+    }
+
+    const time_t from = jst(2026, 8, 29, 9, 0);
+    const time_t to   = jst(2026, 8, 29, 17, 0);   /* 8 hours */
+
+    /* Dry all the way through. */
+    window_judgement_t w = judge_window(s, 48, from, to, &DEFAULT_CFG);
+    CHECK(w.verdict == V_OK, "dry window -> %d, expected V_OK", w.verdict);
+    CHECK(w.window_hours == 8, "window_hours=%d expected 8", w.window_hours);
+    CHECK(!w.has_rain, "dry window should report no rain");
+
+    /* One wet hour late in the window is a caution, not a washout. */
+    s[15].mm = 1.0f;   /* 15:00 */
+    w = judge_window(s, 48, from, to, &DEFAULT_CFG);
+    CHECK(w.verdict == V_CAUTION, "one wet hour -> %d, expected V_CAUTION", w.verdict);
+    CHECK(w.rainy_hours == 1, "rainy_hours=%d expected 1", w.rainy_hours);
+    CHECK(w.rain_start == s[15].t, "rain_start mismatch");
+
+    /* A third of the window wet is a washout. */
+    s[13].mm = 1.0f;
+    s[14].mm = 1.0f;
+    w = judge_window(s, 48, from, to, &DEFAULT_CFG);
+    CHECK(w.verdict == V_BRING_IN, "3 of 8 wet -> %d, expected V_BRING_IN", w.verdict);
+
+    /* Rain at the very start leaves no dry stretch to work with. */
+    for (int i = 0; i < 48; i++) {
+        s[i].mm = 0.0f;
+    }
+    s[9].mm = 1.0f;   /* 09:00, the first slot of the window */
+    w = judge_window(s, 48, from, to, &DEFAULT_CFG);
+    CHECK(w.verdict == V_RAINING, "rain at window start -> %d, expected V_RAINING", w.verdict);
+
+    /* A window the forecast does not reach must not produce a verdict. */
+    w = judge_window(s, 48, base + 100 * JUDGE_SLOT_SEC,
+                     base + 108 * JUDGE_SLOT_SEC, &DEFAULT_CFG);
+    CHECK(w.verdict == V_UNKNOWN, "window beyond the forecast -> %d, expected V_UNKNOWN",
+          w.verdict);
+    CHECK(w.window_hours == 0, "window_hours=%d expected 0", w.window_hours);
+}
+
 int main(void)
 {
+    /* The window maths is local-time based, so pin the zone the device uses
+     * rather than inheriting whatever the build machine has. */
+    setenv("TZ", "JST-9", 1);
+    tzset();
+
     printf("test_judge\n\n");
 
     test_all_dry_is_ok();
@@ -256,6 +379,9 @@ int main(void)
     test_partial_forecast_shorter_than_horizon();
     test_rain_block_runs_to_end_of_data();
     test_nowcast_override();
+    test_outlook_by_hour();
+    test_outlook_windows();
+    test_window_judgement();
 
     printf("\n%d checks, %d failure(s)\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
