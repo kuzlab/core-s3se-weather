@@ -47,6 +47,12 @@ void ui_set_nowcast(float max_mm_h);
 void ui_set_graph(const hour_slot_t *slots, int n_slots, int start,
                   const judge_config_t *cfg);
 
+/* Switches the whole scheme between the light day palette and the dark
+ * night one. Cheap and idempotent: repeated calls with the same value do
+ * nothing. */
+void ui_set_theme(bool night);
+bool ui_is_night_theme(void);
+
 int  ui_range_hours(void);
 void ui_set_range_hours(int hours);
 

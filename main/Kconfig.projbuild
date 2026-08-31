@@ -201,20 +201,28 @@ config LW_BRIGHTNESS_DAY
 
 config LW_BRIGHTNESS_NIGHT
     int "Night backlight brightness"
-    default 96
+    default 128
     range 1 255
     help
-        Note that the backlight is an AXP2101 LDO with only about nine
-        usable steps, so small changes here may have no visible effect.
+        The backlight is an AXP2101 LDO spanning only 2.5-3.3V in nine
+        steps, so this cannot dim much on its own -- most of the reduction
+        at night comes from switching to the dark palette. The value maps
+        to volts as 1-30 -> 2.5V, 95-126 -> 2.8V, 127-158 -> 2.9V,
+        255 -> 3.3V, and the chosen voltage is logged when it changes.
+
+        Going too low risks dropping under the backlight's turn-on point,
+        which reads as a dead screen rather than a dim one.
 
 config LW_NIGHT_START_HOUR
-    int "Night dimming starts at [hour, JST]"
+    int "Night mode starts at [hour, JST]"
     default 22
     range 0 23
+    help
+        Dims the backlight and switches the display to the dark palette.
 
 config LW_NIGHT_END_HOUR
-    int "Night dimming ends at [hour, JST]"
-    default 6
+    int "Night mode ends at [hour, JST]"
+    default 7
     range 0 23
 
 config LW_UI_STALL_RESTART_SEC

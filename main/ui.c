@@ -36,36 +36,55 @@ static const char *TAG = "ui";
 #define ICON_X           8
 #define BANNER_TEXT_X    (ICON_X + ICON_BOX + 8)
 
-/* --- palette -------------------------------------------------------------
- * A light, warm scheme: this sits in a living space, not a server rack.
- * Verdict colours are a soft tint behind saturated same-hue text, which
+/* --- palettes -----------------------------------------------------------
+ * Two schemes, swapped on the clock. The day scheme is light because the
+ * thing sits in a living space; at night the same brightness is glare, and
+ * turning the backlight down alone cannot fix that -- DLDO1 only spans
+ * 2.5-3.3V, so most of the reduction has to come from what is drawn.
+ *
+ * Verdict colours are a tint behind same-hue text in both schemes, which
  * reads as friendlier than white-on-saturated and holds more contrast. */
-#define C_BG            0xF6F3EC
-#define C_CARD          0xFFFFFF
-#define C_TEXT          0x3D4450
-#define C_DIM           0x929AA5
-#define C_BORDER        0xE6E1D8
+typedef struct {
+    uint32_t bg, card, text, dim, border;
+    uint32_t ok_bg, ok_fg;
+    uint32_t caution_bg, caution_fg;
+    uint32_t bring_in_bg, bring_in_fg;
+    uint32_t raining_bg, raining_fg;
+    uint32_t unknown_bg, unknown_fg;
+    uint32_t sun, sun_halo, cloud, cloud_light, drop;
+    uint32_t pop_bar, mm_bar, mm_rainy;
+} ui_palette_t;
 
-#define C_OK_BG         0xE7F6EA
-#define C_OK_FG         0x2E7D4F
-#define C_CAUTION_BG    0xFFF4DC
-#define C_CAUTION_FG    0xA9760A
-#define C_BRING_IN_BG   0xFFE9DC
-#define C_BRING_IN_FG   0xC0551D
-#define C_RAINING_BG    0xFFE4E6
-#define C_RAINING_FG    0xC0392B
-#define C_UNKNOWN_BG    0xEDEBE6
-#define C_UNKNOWN_FG    0x8A9199
+static const ui_palette_t PALETTE_DAY = {
+    .bg = 0xF6F3EC, .card = 0xFFFFFF, .text = 0x3D4450,
+    .dim = 0x929AA5, .border = 0xE6E1D8,
+    .ok_bg       = 0xE7F6EA, .ok_fg       = 0x2E7D4F,
+    .caution_bg  = 0xFFF4DC, .caution_fg  = 0xA9760A,
+    .bring_in_bg = 0xFFE9DC, .bring_in_fg = 0xC0551D,
+    .raining_bg  = 0xFFE4E6, .raining_fg  = 0xC0392B,
+    .unknown_bg  = 0xEDEBE6, .unknown_fg  = 0x8A9199,
+    .sun = 0xFFC93C, .sun_halo = 0xFFE7A3,
+    .cloud = 0xAFC0D2, .cloud_light = 0xC9D6E3, .drop = 0x4A90D9,
+    .pop_bar = 0xDCE7F3, .mm_bar = 0x86B8E6, .mm_rainy = 0x3C7FC4,
+};
 
-#define C_SUN           0xFFC93C
-#define C_SUN_HALO      0xFFE7A3
-#define C_CLOUD         0xAFC0D2
-#define C_CLOUD_LIGHT   0xC9D6E3
-#define C_DROP          0x4A90D9
+/* Deliberately not pure black: a dark grey lets the tinted banner read as a
+ * colour rather than as the only lit thing on the panel. Foregrounds are
+ * held well below white so nothing glares in a dark room. */
+static const ui_palette_t PALETTE_NIGHT = {
+    .bg = 0x14171C, .card = 0x1B1F26, .text = 0xB6BEC8,
+    .dim = 0x69717C, .border = 0x282D36,
+    .ok_bg       = 0x16301F, .ok_fg       = 0x63B47F,
+    .caution_bg  = 0x322708, .caution_fg  = 0xC79A3C,
+    .bring_in_bg = 0x38200F, .bring_in_fg = 0xD1794A,
+    .raining_bg  = 0x361419, .raining_fg  = 0xCF6B78,
+    .unknown_bg  = 0x1F232A, .unknown_fg  = 0x69717C,
+    .sun = 0xB08A28, .sun_halo = 0x3B3117,
+    .cloud = 0x4E5967, .cloud_light = 0x616D7C, .drop = 0x3C6E9E,
+    .pop_bar = 0x1E2A3A, .mm_bar = 0x3C6E9E, .mm_rainy = 0x5B9BD5,
+};
 
-#define C_POP_BAR       0xDCE7F3
-#define C_MM_BAR        0x86B8E6
-#define C_MM_RAINY      0x3C7FC4
+static const ui_palette_t *s_pal = &PALETTE_DAY;
 
 /* Bars are pre-created for the widest range so switching 24h <-> 12h only
  * resizes them; creating and deleting objects on every update would churn
@@ -128,6 +147,8 @@ static bool      s_rain_animating;
 
 static int         s_range_hours = 24;
 static ui_tap_cb_t s_tap_cb;
+static verdict_t   s_verdict = V_UNKNOWN;
+static bool        s_night_theme;
 
 static const char *verdict_text(verdict_t v)
 {
@@ -143,22 +164,22 @@ static const char *verdict_text(verdict_t v)
 static uint32_t verdict_bg(verdict_t v)
 {
     switch (v) {
-        case V_OK:       return C_OK_BG;
-        case V_CAUTION:  return C_CAUTION_BG;
-        case V_BRING_IN: return C_BRING_IN_BG;
-        case V_RAINING:  return C_RAINING_BG;
-        default:         return C_UNKNOWN_BG;
+        case V_OK:       return s_pal->ok_bg;
+        case V_CAUTION:  return s_pal->caution_bg;
+        case V_BRING_IN: return s_pal->bring_in_bg;
+        case V_RAINING:  return s_pal->raining_bg;
+        default:         return s_pal->unknown_bg;
     }
 }
 
 static uint32_t verdict_fg(verdict_t v)
 {
     switch (v) {
-        case V_OK:       return C_OK_FG;
-        case V_CAUTION:  return C_CAUTION_FG;
-        case V_BRING_IN: return C_BRING_IN_FG;
-        case V_RAINING:  return C_RAINING_FG;
-        default:         return C_UNKNOWN_FG;
+        case V_OK:       return s_pal->ok_fg;
+        case V_CAUTION:  return s_pal->caution_fg;
+        case V_BRING_IN: return s_pal->bring_in_fg;
+        case V_RAINING:  return s_pal->raining_fg;
+        default:         return s_pal->unknown_fg;
     }
 }
 
@@ -217,17 +238,17 @@ static void build_icon(lv_obj_t *parent)
     lv_obj_remove_flag(s_icon_box, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(s_icon_box, LV_OBJ_FLAG_CLICKABLE);
 
-    s_sun_halo = make_shape(s_icon_box, 44, 44, 22, C_SUN_HALO);
-    s_sun_core = make_shape(s_icon_box, 30, 30, 15, C_SUN);
+    s_sun_halo = make_shape(s_icon_box, 44, 44, 22, s_pal->sun_halo);
+    s_sun_core = make_shape(s_icon_box, 30, 30, 15, s_pal->sun);
 
     /* Cloud: three lobes over a flat base. */
-    s_cloud_parts[0] = make_shape(s_icon_box, 40, 15, 8, C_CLOUD);
-    s_cloud_parts[1] = make_shape(s_icon_box, 20, 20, 10, C_CLOUD);
-    s_cloud_parts[2] = make_shape(s_icon_box, 26, 26, 13, C_CLOUD_LIGHT);
-    s_cloud_parts[3] = make_shape(s_icon_box, 18, 18, 9, C_CLOUD);
+    s_cloud_parts[0] = make_shape(s_icon_box, 40, 15, 8, s_pal->cloud);
+    s_cloud_parts[1] = make_shape(s_icon_box, 20, 20, 10, s_pal->cloud);
+    s_cloud_parts[2] = make_shape(s_icon_box, 26, 26, 13, s_pal->cloud_light);
+    s_cloud_parts[3] = make_shape(s_icon_box, 18, 18, 9, s_pal->cloud);
 
     for (int i = 0; i < N_DROPS; i++) {
-        s_drops[i] = make_shape(s_icon_box, 4, 9, 2, C_DROP);
+        s_drops[i] = make_shape(s_icon_box, 4, 9, 2, s_pal->drop);
         lv_obj_add_flag(s_drops[i], LV_OBJ_FLAG_HIDDEN);
     }
 }
@@ -312,14 +333,14 @@ static void set_icon(verdict_t v)
 static void build_screen(void)
 {
     lv_obj_t *scr = lv_screen_active();
-    lv_obj_set_style_bg_color(scr, lv_color_hex(C_BG), 0);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(s_pal->bg), 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(scr, screen_tap_cb, LV_EVENT_CLICKED, NULL);
 
     /* --- header --- */
-    s_place_label = make_label(scr, &lw_font_jp_16, C_TEXT, PAD_X, HEADER_Y);
-    s_status_label = make_label(scr, &lw_font_jp_16, C_DIM, 0, HEADER_Y);
+    s_place_label = make_label(scr, &lw_font_jp_16, s_pal->text, PAD_X, HEADER_Y);
+    s_status_label = make_label(scr, &lw_font_jp_16, s_pal->dim, 0, HEADER_Y);
     lv_obj_set_style_text_align(s_status_label, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_width(s_status_label, SCREEN_W / 2);
     lv_obj_set_pos(s_status_label, SCREEN_W - PAD_X - SCREEN_W / 2, HEADER_Y);
@@ -331,7 +352,7 @@ static void build_screen(void)
     lv_obj_set_style_radius(s_banner, 14, 0);
     lv_obj_set_style_border_width(s_banner, 0, 0);
     lv_obj_set_style_pad_all(s_banner, 0, 0);
-    lv_obj_set_style_bg_color(s_banner, lv_color_hex(C_UNKNOWN_BG), 0);
+    lv_obj_set_style_bg_color(s_banner, lv_color_hex(s_pal->unknown_bg), 0);
     lv_obj_remove_flag(s_banner, LV_OBJ_FLAG_SCROLLABLE);
     /* Taps must reach the screen handler, not stop at the banner. */
     lv_obj_remove_flag(s_banner, LV_OBJ_FLAG_CLICKABLE);
@@ -340,20 +361,20 @@ static void build_screen(void)
 
     s_banner_label = lv_label_create(s_banner);
     lv_obj_set_style_text_font(s_banner_label, &lw_font_jp_24, 0);
-    lv_obj_set_style_text_color(s_banner_label, lv_color_hex(C_UNKNOWN_FG), 0);
+    lv_obj_set_style_text_color(s_banner_label, lv_color_hex(s_pal->unknown_fg), 0);
     lv_obj_set_style_text_align(s_banner_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_width(s_banner_label, GRAPH_W - BANNER_TEXT_X - 6);
     lv_obj_set_pos(s_banner_label, BANNER_TEXT_X, (BANNER_H - 26) / 2);
     lv_label_set_text(s_banner_label, verdict_text(V_UNKNOWN));
 
     /* --- summary --- */
-    s_summary1 = make_label(scr, &lw_font_jp_16, C_TEXT, PAD_X, SUMMARY1_Y);
-    s_summary2 = make_label(scr, &lw_font_jp_16, C_TEXT, PAD_X, SUMMARY2_Y);
+    s_summary1 = make_label(scr, &lw_font_jp_16, s_pal->text, PAD_X, SUMMARY1_Y);
+    s_summary2 = make_label(scr, &lw_font_jp_16, s_pal->text, PAD_X, SUMMARY2_Y);
 
     /* --- graph --- */
-    s_graph_caption = make_label(scr, &lw_font_jp_16, C_DIM, PAD_X, CAPTION_Y);
+    s_graph_caption = make_label(scr, &lw_font_jp_16, s_pal->dim, PAD_X, CAPTION_Y);
 
-    s_nowcast = make_label(scr, &lw_font_jp_16, C_DIM, 0, CAPTION_Y);
+    s_nowcast = make_label(scr, &lw_font_jp_16, s_pal->dim, 0, CAPTION_Y);
     lv_obj_set_style_text_align(s_nowcast, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_width(s_nowcast, SCREEN_W / 2);
     lv_obj_set_pos(s_nowcast, SCREEN_W - PAD_X - SCREEN_W / 2, CAPTION_Y);
@@ -362,8 +383,8 @@ static void build_screen(void)
     s_graph_area = lv_obj_create(scr);
     lv_obj_set_size(s_graph_area, GRAPH_W, GRAPH_H);
     lv_obj_set_pos(s_graph_area, GRAPH_X, GRAPH_Y);
-    lv_obj_set_style_bg_color(s_graph_area, lv_color_hex(C_CARD), 0);
-    lv_obj_set_style_border_color(s_graph_area, lv_color_hex(C_BORDER), 0);
+    lv_obj_set_style_bg_color(s_graph_area, lv_color_hex(s_pal->card), 0);
+    lv_obj_set_style_border_color(s_graph_area, lv_color_hex(s_pal->border), 0);
     lv_obj_set_style_border_width(s_graph_area, 1, 0);
     lv_obj_set_style_radius(s_graph_area, 6, 0);
     lv_obj_set_style_pad_all(s_graph_area, 0, 0);
@@ -371,16 +392,76 @@ static void build_screen(void)
     lv_obj_remove_flag(s_graph_area, LV_OBJ_FLAG_CLICKABLE);
 
     for (int i = 0; i < MAX_BARS; i++) {
-        s_pop_bars[i] = make_shape(s_graph_area, 1, 1, 1, C_POP_BAR);
-        s_mm_bars[i]  = make_shape(s_graph_area, 1, 1, 1, C_MM_BAR);
+        s_pop_bars[i] = make_shape(s_graph_area, 1, 1, 1, s_pal->pop_bar);
+        s_mm_bars[i]  = make_shape(s_graph_area, 1, 1, 1, s_pal->mm_bar);
     }
 
     for (int i = 0; i < MAX_AXIS_LABELS; i++) {
-        s_axis_labels[i] = make_label(scr, &lw_font_jp_16, C_DIM, 0, AXIS_Y);
+        s_axis_labels[i] = make_label(scr, &lw_font_jp_16, s_pal->dim, 0, AXIS_Y);
         lv_obj_add_flag(s_axis_labels[i], LV_OBJ_FLAG_HIDDEN);
     }
 
     set_icon(V_UNKNOWN);
+}
+
+/* Re-colours every persistent object. The bar colours are also set on each
+ * graph update, but doing them here too avoids a stale-looking minute
+ * between a theme change and the next refresh. */
+static void apply_palette(void)
+{
+    lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(s_pal->bg), 0);
+
+    lv_obj_set_style_text_color(s_place_label, lv_color_hex(s_pal->text), 0);
+    lv_obj_set_style_text_color(s_status_label, lv_color_hex(s_pal->dim), 0);
+    lv_obj_set_style_text_color(s_summary1, lv_color_hex(s_pal->text), 0);
+    lv_obj_set_style_text_color(s_summary2, lv_color_hex(s_pal->text), 0);
+    lv_obj_set_style_text_color(s_nowcast, lv_color_hex(s_pal->dim), 0);
+    lv_obj_set_style_text_color(s_graph_caption, lv_color_hex(s_pal->dim), 0);
+
+    lv_obj_set_style_bg_color(s_banner, lv_color_hex(verdict_bg(s_verdict)), 0);
+    lv_obj_set_style_text_color(s_banner_label, lv_color_hex(verdict_fg(s_verdict)), 0);
+
+    lv_obj_set_style_bg_color(s_graph_area, lv_color_hex(s_pal->card), 0);
+    lv_obj_set_style_border_color(s_graph_area, lv_color_hex(s_pal->border), 0);
+
+    for (int i = 0; i < MAX_BARS; i++) {
+        lv_obj_set_style_bg_color(s_pop_bars[i], lv_color_hex(s_pal->pop_bar), 0);
+        lv_obj_set_style_bg_color(s_mm_bars[i], lv_color_hex(s_pal->mm_bar), 0);
+    }
+    for (int i = 0; i < MAX_AXIS_LABELS; i++) {
+        lv_obj_set_style_text_color(s_axis_labels[i], lv_color_hex(s_pal->dim), 0);
+    }
+
+    lv_obj_set_style_bg_color(s_sun_halo, lv_color_hex(s_pal->sun_halo), 0);
+    lv_obj_set_style_bg_color(s_sun_core, lv_color_hex(s_pal->sun), 0);
+    lv_obj_set_style_bg_color(s_cloud_parts[0], lv_color_hex(s_pal->cloud), 0);
+    lv_obj_set_style_bg_color(s_cloud_parts[1], lv_color_hex(s_pal->cloud), 0);
+    lv_obj_set_style_bg_color(s_cloud_parts[2], lv_color_hex(s_pal->cloud_light), 0);
+    lv_obj_set_style_bg_color(s_cloud_parts[3], lv_color_hex(s_pal->cloud), 0);
+    for (int i = 0; i < N_DROPS; i++) {
+        lv_obj_set_style_bg_color(s_drops[i], lv_color_hex(s_pal->drop), 0);
+    }
+}
+
+void ui_set_theme(bool night)
+{
+    if (night == s_night_theme) {
+        return;
+    }
+    if (!lvgl_port_lock(UI_LOCK_TIMEOUT_MS)) {
+        log_lock_timeout("ui_set_theme");
+        return;
+    }
+    s_night_theme = night;
+    s_pal = night ? &PALETTE_NIGHT : &PALETTE_DAY;
+    apply_palette();
+    lvgl_port_unlock();
+    ESP_LOGI(TAG, "theme -> %s", night ? "night" : "day");
+}
+
+bool ui_is_night_theme(void)
+{
+    return s_night_theme;
 }
 
 esp_err_t ui_start(esp_lcd_panel_handle_t panel,
@@ -475,6 +556,7 @@ void ui_set_verdict(verdict_t v, const char *text)
         log_lock_timeout("ui_set_verdict");
         return;
     }
+    s_verdict = v;
     lv_obj_set_style_bg_color(s_banner, lv_color_hex(verdict_bg(v)), 0);
     lv_obj_set_style_text_color(s_banner_label, lv_color_hex(verdict_fg(v)), 0);
     lv_label_set_text(s_banner_label, (text != NULL) ? text : verdict_text(v));
@@ -584,7 +666,7 @@ void ui_set_graph(const hour_slot_t *slots, int n_slots, int start,
 
         const bool rainy = judge_is_rainy(slot, cfg);
         lv_obj_set_style_bg_color(s_mm_bars[i],
-                                  lv_color_hex(rainy ? C_MM_RAINY : C_MM_BAR), 0);
+                                  lv_color_hex(rainy ? s_pal->mm_rainy : s_pal->mm_bar), 0);
         lv_obj_set_size(s_mm_bars[i], bar_w, mm_h > 0 ? mm_h : 1);
         lv_obj_set_pos(s_mm_bars[i], x, GRAPH_H - (mm_h > 0 ? mm_h : 1));
         lv_obj_set_style_bg_opa(s_mm_bars[i], mm_h > 0 ? LV_OPA_COVER : LV_OPA_TRANSP, 0);

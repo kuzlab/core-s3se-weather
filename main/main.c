@@ -286,11 +286,14 @@ static void format_summary(const app_state_t *st, char *l1, size_t l1_len,
     }
 }
 
-static void apply_night_dimming(void)
+/* Night is one decision driving two things: the backlight and the palette.
+ * Dimming alone is not enough -- DLDO1 only spans 2.5-3.3V, so a light
+ * scheme still glares in a dark room no matter how far it is turned down. */
+static void apply_night_mode(void)
 {
     static int last_brightness = -1;
 
-    int brightness = CONFIG_LW_BRIGHTNESS_DAY;
+    bool night = false;
     if (time_is_valid()) {
         const time_t now = time(NULL);
         struct tm local;
@@ -301,12 +304,14 @@ static void apply_night_dimming(void)
         const int end   = CONFIG_LW_NIGHT_END_HOUR;
         /* The night window normally wraps past midnight, so it is two
          * ranges rather than one comparison. */
-        const bool night = (start <= end) ? (h >= start && h < end)
-                                          : (h >= start || h < end);
-        if (night) {
-            brightness = CONFIG_LW_BRIGHTNESS_NIGHT;
-        }
+        night = (start <= end) ? (h >= start && h < end)
+                               : (h >= start || h < end);
     }
+
+    ui_set_theme(night);
+
+    const int brightness = night ? CONFIG_LW_BRIGHTNESS_NIGHT
+                                 : CONFIG_LW_BRIGHTNESS_DAY;
 
     if (brightness != last_brightness) {
         const esp_err_t err = bsp_backlight_set((uint8_t)brightness);
@@ -466,7 +471,7 @@ static void render(void)
         }
     }
 
-    apply_night_dimming();
+    apply_night_mode();
 }
 
 static void ui_task(void *arg)
