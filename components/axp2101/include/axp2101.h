@@ -46,6 +46,22 @@ esp_err_t axp2101_cores3se_power_on(axp2101_handle_t h);
  * That 9-step range is the entire usable span; see docs/HARDWARE.md §1-3. */
 esp_err_t axp2101_set_backlight(axp2101_handle_t h, uint8_t brightness);
 
+/* Reads the rail-enable and backlight registers back.
+ *
+ * Register 0x90 holds the on/off bits for every rail at once, including the
+ * ones feeding the panel's logic. It is never read-modify-written at
+ * runtime -- a single corrupted read would otherwise write back a value
+ * that switches other rails off, blanking the display until a reboot -- so
+ * the driver keeps a shadow of what it wrote and can tell when the chip has
+ * drifted from it. Drift is repaired and reported.
+ *
+ * Any out_* pointer may be NULL. */
+esp_err_t axp2101_check_rails(axp2101_handle_t h,
+                              uint8_t *out_ldo_en0,
+                              uint8_t *out_expected,
+                              uint8_t *out_dldo1_vol,
+                              bool *out_repaired);
+
 #ifdef __cplusplus
 }
 #endif

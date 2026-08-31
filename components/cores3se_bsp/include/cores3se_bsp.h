@@ -84,6 +84,15 @@ bool      bsp_audio_available(void);
 /* Two short rising notes, played when the verdict gets worse (SPEC §1.4). */
 esp_err_t bsp_beep_alert(void);
 
+/* Reads the PMIC's rail-enable and backlight registers back and logs them,
+ * repairing the rail register if it no longer matches what was written.
+ * Returns true if a repair was needed.
+ *
+ * Worth running periodically: a blank screen with a healthy UI task means
+ * the panel lost power or backlight, and nothing else in the system would
+ * notice. */
+bool bsp_power_health_check(void);
+
 /* Probes every 7-bit address and logs what answered. Milestone 1's check. */
 void bsp_i2c_scan_log(void);
 

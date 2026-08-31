@@ -198,6 +198,38 @@ esp_err_t bsp_backlight_set(uint8_t brightness)
     return axp2101_set_backlight(s_axp2101, brightness);
 }
 
+bool bsp_power_health_check(void)
+{
+    if (s_axp2101 == NULL) {
+        return false;
+    }
+
+    uint8_t ldo_en0 = 0;
+    uint8_t expected = 0;
+    uint8_t dldo1 = 0;
+    bool repaired = false;
+
+    const esp_err_t err = axp2101_check_rails(s_axp2101, &ldo_en0, &expected,
+                                              &dldo1, &repaired);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "PMIC health read failed: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    /* DLDO1 is the backlight, and its register value is the voltage:
+     * V = 0.5 + 0.1 * N. Printing the volts makes a dark screen easy to tell
+     * apart from a dim one. */
+    const int mv = 500 + dldo1 * 100;
+    ESP_LOGI(TAG, "PMIC: LDO_EN0=0x%02x (expected 0x%02x), DLDO1=%d (%d.%dV)%s",
+             ldo_en0, expected, dldo1, mv / 1000, (mv % 1000) / 100,
+             repaired ? " [REPAIRED]" : "");
+
+    if ((ldo_en0 & AXP2101_LDO_EN0_DLDO1) == 0) {
+        ESP_LOGE(TAG, "backlight rail is off -- the screen is dark");
+    }
+    return repaired;
+}
+
 void bsp_i2c_scan_log(void)
 {
     if (s_bus == NULL) {

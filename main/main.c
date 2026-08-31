@@ -309,8 +309,13 @@ static void apply_night_dimming(void)
     }
 
     if (brightness != last_brightness) {
-        bsp_backlight_set((uint8_t)brightness);
-        ESP_LOGI(TAG, "backlight -> %d", brightness);
+        const esp_err_t err = bsp_backlight_set((uint8_t)brightness);
+        /* The DLDO1 register is the voltage, so log the volts too: the
+         * usable span is only 2.5-3.3V and the low end may be below the
+         * backlight's turn-on point. */
+        const int mv = 500 + (((brightness + 641) >> 5) * 100);
+        ESP_LOGI(TAG, "backlight -> %d (DLDO1 %d.%dV): %s",
+                 brightness, mv / 1000, (mv % 1000) / 100, esp_err_to_name(err));
         last_brightness = brightness;
     }
 }
@@ -491,6 +496,9 @@ static void ui_task(void *arg)
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
                      esp_timer_get_time() / 1000000);
+            /* Paired with the heap log so a blank screen leaves a record of
+             * what the PMIC actually held at the time. */
+            bsp_power_health_check();
             last_heap_log_us = esp_timer_get_time();
         }
 
