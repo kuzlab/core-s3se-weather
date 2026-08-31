@@ -17,6 +17,7 @@
 #include "weather_openmeteo.h"
 #include "wifi.h"
 
+#include "driver/gpio.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -513,6 +514,25 @@ static void ui_task(void *arg)
 
 /* ------------------------------------------------------- stall watchdog --- */
 
+/* esp_restart() is not enough on its own here. GPIO0 is the boot strapping
+ * pin: if anything is still driving it low when the chip comes back up, the
+ * ROM enters download mode and the application never starts -- which turns
+ * a recoverable hang into a board that needs unplugging. Quiesce what could
+ * be driving pins, and put GPIO0 back to a floating input, before resetting. */
+static void restart_safely(const char *reason)
+{
+    ESP_LOGE(TAG, "restarting: %s", reason);
+
+#if CONFIG_LW_ENABLE_BEEP
+    bsp_audio_quiesce();
+#endif
+    gpio_reset_pin(GPIO_NUM_0);
+
+    /* Let the log drain before the reset takes the console with it. */
+    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_restart();
+}
+
 #if CONFIG_LW_UI_STALL_RESTART_SEC > 0
 /* Deliberately its own task with no dependencies: it must stay alive when
  * every other task is stuck. It takes no locks, does no I/O, and touches
@@ -524,21 +544,21 @@ static void stall_watchdog_task(void *arg)
 
         const uint32_t now_sec = (uint32_t)(esp_timer_get_time() / 1000000);
         const uint32_t last = s_last_render_sec;
-        if (last == 0) {
-            continue;  /* the UI has not rendered even once yet */
-        }
 
-        const uint32_t stalled_for = now_sec - last;
+        /* A UI that has never drawn once is just as stuck as one that has
+         * stopped, and skipping this case left the watchdog disabled for
+         * exactly the boot where it was needed most. */
+        const uint32_t stalled_for = (last == 0) ? now_sec : (now_sec - last);
+        const char *what = (last == 0) ? "UI never drew its first frame"
+                                       : "UI has not redrawn";
+
         if (stalled_for >= CONFIG_LW_UI_STALL_RESTART_SEC) {
-            ESP_LOGE(TAG, "UI has not redrawn for %u s (limit %d s) -- restarting",
-                     (unsigned)stalled_for, CONFIG_LW_UI_STALL_RESTART_SEC);
+            ESP_LOGE(TAG, "%s for %u s (limit %d s)",
+                     what, (unsigned)stalled_for, CONFIG_LW_UI_STALL_RESTART_SEC);
             ESP_LOGE(TAG, "heap at stall: internal %u free, largest block %u",
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
-            /* Give the log a moment to drain before the reset takes the
-             * console with it. */
-            vTaskDelay(pdMS_TO_TICKS(200));
-            esp_restart();
+            restart_safely(what);
         }
     }
 }
@@ -611,16 +631,12 @@ void app_main(void)
      * because its result was ignored. The display then sat on its startup
      * banner forever with no task left to update it. */
     if (xTaskCreate(ui_task, "ui", UI_TASK_STACK, NULL, UI_TASK_PRIO, &s_ui_task) != pdPASS) {
-        ESP_LOGE(TAG, "could not create the UI task -- restarting");
         log_internal_heap("at failure");
-        vTaskDelay(pdMS_TO_TICKS(200));
-        esp_restart();
+        restart_safely("could not create the UI task");
     }
     if (xTaskCreate(net_task, "net", NET_TASK_STACK, NULL, NET_TASK_PRIO, &s_net_task) != pdPASS) {
-        ESP_LOGE(TAG, "could not create the network task -- restarting");
         log_internal_heap("at failure");
-        vTaskDelay(pdMS_TO_TICKS(200));
-        esp_restart();
+        restart_safely("could not create the network task");
     }
 #if CONFIG_LW_UI_STALL_RESTART_SEC > 0
     /* Higher priority than the tasks it supervises, so a busy or blocked

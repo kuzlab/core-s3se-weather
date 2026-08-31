@@ -27,9 +27,15 @@ static const char *TAG = "bsp.audio";
 
 /* I2S pins for CoreS3 SE. Note DOUT is GPIO13: SPEC §4.2's table has DOUT
  * and DIN swapped relative to M5Unified, and the spec itself notes the
- * documentation disagrees with itself here (docs/HARDWARE.md §4). */
+ * documentation disagrees with itself here (docs/HARDWARE.md §4).
+ *
+ * There is deliberately no MCLK. M5Unified routes MCLK to GPIO0 for the
+ * *microphone* only; its speaker path does not use one, and the AW88298
+ * clocks fine from BCK. GPIO0 is also the boot strapping pin, so driving it
+ * from the I2S peripheral means that if the chip resets while the pin is
+ * low, the ROM enters download mode instead of starting the application --
+ * a software restart then leaves the board dead until it is unplugged. */
 #define AUDIO_I2S_PORT  I2S_NUM_1
-#define AUDIO_MCLK_GPIO 0
 #define AUDIO_BCLK_GPIO 34
 #define AUDIO_WS_GPIO   33
 #define AUDIO_DOUT_GPIO 13
@@ -134,7 +140,8 @@ esp_err_t bsp_audio_init(void)
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
                                                         I2S_SLOT_MODE_STEREO),
         .gpio_cfg = {
-            .mclk = AUDIO_MCLK_GPIO,
+            /* Never GPIO0 -- see the note above the pin definitions. */
+            .mclk = I2S_GPIO_UNUSED,
             .bclk = AUDIO_BCLK_GPIO,
             .ws   = AUDIO_WS_GPIO,
             .dout = AUDIO_DOUT_GPIO,
@@ -157,7 +164,7 @@ esp_err_t bsp_audio_init(void)
     }
 
     s_ready = true;
-    ESP_LOGI(TAG, "AW88298 up (%d Hz, volume %d/10, amplitude %d)",
+    ESP_LOGI(TAG, "AW88298 up (%d Hz, no MCLK, volume %d/10, amplitude %d)",
              AUDIO_SAMPLE_RATE, AUDIO_VOLUME_STEPS, AUDIO_AMPLITUDE);
     return ESP_OK;
 }
@@ -212,4 +219,16 @@ esp_err_t bsp_beep_alert(void)
 bool bsp_audio_available(void)
 {
     return s_ready;
+}
+
+void bsp_audio_quiesce(void)
+{
+    if (s_tx != NULL) {
+        i2s_channel_disable(s_tx);
+    }
+    if (s_aw88298 != NULL) {
+        /* I2SEN=0: stop the amplifier driving the speaker. */
+        aw88298_write(0x04, 0x4000);
+    }
+    s_ready = false;
 }

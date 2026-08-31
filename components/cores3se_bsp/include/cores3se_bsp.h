@@ -84,6 +84,10 @@ bool      bsp_audio_available(void);
 /* Two short rising notes, played when the verdict gets worse (SPEC §1.4). */
 esp_err_t bsp_beep_alert(void);
 
+/* Stops the I2S clocks and the amplifier. Call before a software restart so
+ * no peripheral is still driving pins while the chip comes back up. */
+void bsp_audio_quiesce(void);
+
 /* Reads the PMIC's rail-enable and backlight registers back and logs them,
  * repairing the rail register if it no longer matches what was written.
  * Returns true if a repair was needed.
